@@ -28,8 +28,12 @@ export default async function ReformaPage() {
       </AppLayout>
     );
 
-  const anos = await apuracaoReformaPorAno(emp.id);
-  const comp = await comparativoAntesDepois(emp.id);
+  const anos = await apuracaoReformaPorAno(emp.id).catch(() => []);
+  const comp = await comparativoAntesDepois(emp.id).catch(() => ({
+    pre_reforma: { periodos: 0, receita: 0, pis: 0, cofins: 0, ipi: 0, total_extintos: 0 },
+    transicao_2026: { periodos: 0, receita: 0, cbs_teste: 0, ibs_teste: 0 },
+    reforma_2027: { periodos: 0, receita: 0, cbs: 0, ibs: 0, is: 0, total_novos: 0 },
+  }));
 
   return (
     <AppLayout>

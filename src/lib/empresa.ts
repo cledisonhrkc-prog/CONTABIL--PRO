@@ -3,8 +3,14 @@ import { empresas } from "@/db/schema";
 import { eq } from "drizzle-orm";
 
 export async function getEmpresaAtiva() {
-  const rows = await db.select().from(empresas).limit(1);
-  return rows[0] ?? null;
+  // Tolerante: se as tabelas ainda não existem (primeiro deploy antes do setup),
+  // retorna null em vez de crashar.
+  try {
+    const rows = await db.select().from(empresas).limit(1);
+    return rows[0] ?? null;
+  } catch {
+    return null;
+  }
 }
 
 export async function garantirEmpresa(dados: {

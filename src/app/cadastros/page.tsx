@@ -6,7 +6,11 @@ import { asc } from "drizzle-orm";
 export const dynamic = "force-dynamic";
 
 export default async function CadastrosPage() {
-  const contas = await db.select().from(planoContas).orderBy(asc(planoContas.codigo));
+  const contas = await db
+    .select()
+    .from(planoContas)
+    .orderBy(asc(planoContas.codigo))
+    .catch(() => []);
   return (
     <AppLayout>
       <h1 className="text-2xl font-bold text-slate-800 mb-2">Plano de Contas</h1>

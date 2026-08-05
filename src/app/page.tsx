@@ -16,19 +16,18 @@ import { eq } from "drizzle-orm";
 export const dynamic = "force-dynamic";
 
 const ACESSOS = [
-  { label: "Novo Lançamento", icon: "➕", color: "bg-emerald-500", href: "/lancamentos" },
+  { label: "Importar XML", icon: "⬆️", color: "bg-amber-500", href: "/importar" },
   { label: "Plano de Contas", icon: "📋", color: "bg-indigo-500", href: "/cadastros" },
   { label: "Lançamentos", icon: "📝", color: "bg-indigo-500", href: "/lancamentos" },
-  { label: "Importar XML", icon: "⬆️", color: "bg-amber-500", href: "/importar" },
-  { label: "Nota Fiscal", icon: "🧾", color: "bg-red-500", href: "/notas" },
+  { label: "Notas Fiscais", icon: "🧾", color: "bg-red-500", href: "/notas" },
   { label: "Balancete", icon: "⚖️", color: "bg-emerald-600", href: "/balancete" },
   { label: "DRE", icon: "📈", color: "bg-blue-500", href: "/dre" },
-  { label: "Balanço", icon: "📊", color: "bg-cyan-500", href: "/dre" },
+  { label: "Razão", icon: "📚", color: "bg-cyan-500", href: "/razao" },
+  { label: "Apuração", icon: "🧾", color: "bg-orange-500", href: "/apuracao" },
   { label: "Auditoria", icon: "🔍", color: "bg-purple-500", href: "/auditoria" },
-  { label: "Relatórios", icon: "📑", color: "bg-slate-600", href: "/relatorios" },
+  { label: "Reforma 2027", icon: "🇧🇷", color: "bg-green-600", href: "/reforma" },
   { label: "PDF", icon: "📄", color: "bg-red-700", href: "/api/exportar/pdf" },
-  { label: "Excel", icon: "📗", color: "bg-green-600", href: "/api/exportar/excel" },
-  { label: "Word", icon: "📘", color: "bg-blue-700", href: "/api/exportar/word" },
+  { label: "Excel", icon: "📗", color: "bg-green-700", href: "/api/exportar/excel" },
 ];
 
 export default async function Home() {
