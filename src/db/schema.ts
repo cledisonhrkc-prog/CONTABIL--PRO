@@ -8,6 +8,7 @@ import {
   date,
   timestamp,
   boolean,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
 
 // ---------------- Empresas ----------------
@@ -112,13 +113,19 @@ export const apuracaoImpostos = pgTable("apuracao_impostos", {
 });
 
 // ---------------- Exercícios ----------------
-export const exercicios = pgTable("exercicios", {
-  id: serial("id").primaryKey(),
-  empresa_id: integer("empresa_id").notNull(),
-  ano: integer("ano").notNull(),
-  status: varchar("status", { length: 20 }).default("ABERTO"),
-  resultado: numeric("resultado", { precision: 18, scale: 2 }).default("0"),
-});
+export const exercicios = pgTable(
+  "exercicios",
+  {
+    id: serial("id").primaryKey(),
+    empresa_id: integer("empresa_id").notNull(),
+    ano: integer("ano").notNull(),
+    status: varchar("status", { length: 20 }).default("ABERTO"),
+    resultado: numeric("resultado", { precision: 18, scale: 2 }).default("0"),
+  },
+  (t) => ({
+    unqEmpresaAno: uniqueIndex("unq_exercicios_empresa_ano").on(t.empresa_id, t.ano),
+  })
+);
 
 // ---------------- Auditoria (R08 monofásico e outras) ----------------
 export const auditoria = pgTable("auditoria", {

@@ -187,9 +187,25 @@ export default function SetupPage() {
               <button onClick={rodarDiag} className="text-sm text-slate-600 hover:text-slate-800">
                 🔄 Re-verificar
               </button>
-              <Link href="/" className="text-sm bg-slate-800 text-white px-4 py-2 rounded hover:bg-slate-900">
-                Ir para o Dashboard →
-              </Link>
+              <div className="flex gap-2">
+                <button
+                  onClick={async () => {
+                    if (!confirm("⚠️ Isso APAGA TODOS OS DADOS (notas, lançamentos, empresa, tudo). Confirmar?")) return;
+                    setLoading(true);
+                    setMsg("Limpando banco...");
+                    const r = await fetch("/api/diagnostico?reset=1", { method: "POST" });
+                    const j = await r.json();
+                    setMsg(j.ok ? "✅ Banco limpo!" : "❌ " + (j.erro ?? "falhou"));
+                    await rodarDiag();
+                  }}
+                  className="text-sm text-red-600 hover:text-red-800 border border-red-200 px-3 py-2 rounded"
+                >
+                  🗑️ Limpar banco
+                </button>
+                <Link href="/importar" className="text-sm bg-slate-800 text-white px-4 py-2 rounded hover:bg-slate-900">
+                  Importar XMLs →
+                </Link>
+              </div>
             </div>
           </div>
         )}

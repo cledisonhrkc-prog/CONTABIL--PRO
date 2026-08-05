@@ -366,11 +366,12 @@ export async function contabilizarLote(input: ContabilizarInput): Promise<Contab
   // ============================================================
   // FASE 3 — BATCH INSERT DE LANÇAMENTOS + ITENS
   // ============================================================
-  const totalLancPreexistente = await db
-    .select({ c: sql<number>`count(*)` })
-    .from(lancamentos)
-    .where(eq(lancamentos.empresa_id, input.empresa_id));
-  let seq = Number(totalLancPreexistente[0]?.c ?? 0);
+  // Usa MAX(numero) em vez de COUNT — evita colisão quando DELETE apaga
+  // lançamentos no meio (ex: reabertura de encerramento entre lotes).
+  const maxSeq = await db.execute<{ m: string | null }>(sql`
+    SELECT COALESCE(MAX(CAST(SUBSTRING(numero FROM 3) AS INTEGER)), 0)::text AS m FROM lancamentos
+  `);
+  let seq = Number(maxSeq.rows[0]?.m ?? 0);
 
   const lancRows: Array<typeof lancamentos.$inferInsert> = [];
   const lancItensPorNumero: Map<string, LancItem[]> = new Map();
@@ -421,10 +422,15 @@ export async function contabilizarLote(input: ContabilizarInput): Promise<Contab
   // FASE 4 — EXERCICIOS + APURACAO + ENCERRAMENTO
   // ============================================================
   for (const ano of Array.from(anos)) {
-    await db
-      .insert(exercicios)
-      .values({ empresa_id: input.empresa_id, ano })
-      .onConflictDoNothing();
+    // Cria só se ainda não existe (idempotente sem depender de UNIQUE constraint)
+    const exist = await db
+      .select({ id: exercicios.id })
+      .from(exercicios)
+      .where(and(eq(exercicios.empresa_id, input.empresa_id), eq(exercicios.ano, ano)))
+      .limit(1);
+    if (exist.length === 0) {
+      await db.insert(exercicios).values({ empresa_id: input.empresa_id, ano });
+    }
   }
 
   await apurarImpostos(input.empresa_id, regime, Array.from(anos));
@@ -521,8 +527,11 @@ async function batchInsertReturning(
 
 // ---------- inserção unitária (para casos raros como IRPJ/CSLL/encerramento) ----------
 async function inserirLancamentoUnico(empresaId: number, lp: LancPreparado) {
-  const total = await db.select({ c: sql<number>`count(*)` }).from(lancamentos);
-  const seq = Number(total[0]?.c ?? 0) + 1;
+  // MAX + 1 pra evitar colisão após DELETE (reabertura de encerramento)
+  const r = await db.execute<{ m: string | null }>(sql`
+    SELECT COALESCE(MAX(CAST(SUBSTRING(numero FROM 3) AS INTEGER)), 0)::text AS m FROM lancamentos
+  `);
+  const seq = Number(r.rows[0]?.m ?? 0) + 1;
   const numero = `LC${String(seq).padStart(8, "0")}`;
   const bal = balancearItens(lp.itens, lp.historico);
   const ex = parseInt(lp.competencia.substring(0, 4), 10);
@@ -649,11 +658,27 @@ async function lucroContabil(empresaId: number, ano: number): Promise<number> {
 }
 
 async function encerrarExercicio(empresaId: number, ano: number): Promise<number | null> {
-  const ex = await db
-    .select()
-    .from(exercicios)
+  // IMPORTANTE: como agora contabilizamos em lotes (múltiplas chamadas seguidas),
+  // se o exercício já foi encerrado, precisamos REABRIR — remover os lançamentos
+  // de encerramento anteriores e refazer com o total acumulado.
+  await db.execute(sql`
+    DELETE FROM lancamento_itens WHERE id_lanc IN (
+      SELECT id FROM lancamentos
+      WHERE empresa_id = ${empresaId}
+        AND exercicio = ${ano}
+        AND tipo_lanc = 'ENCERRAMENTO'
+    )
+  `);
+  await db.execute(sql`
+    DELETE FROM lancamentos
+    WHERE empresa_id = ${empresaId}
+      AND exercicio = ${ano}
+      AND tipo_lanc = 'ENCERRAMENTO'
+  `);
+  await db
+    .update(exercicios)
+    .set({ status: "ABERTO", resultado: "0" })
     .where(and(eq(exercicios.empresa_id, empresaId), eq(exercicios.ano, ano)));
-  if (ex[0]?.status === "ENCERRADO") return null;
 
   const contasR = await db.execute<{ codigo: string; saldo: string }>(sql`
     SELECT li.codigo_conta AS codigo,

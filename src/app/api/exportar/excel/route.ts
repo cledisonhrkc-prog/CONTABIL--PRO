@@ -61,8 +61,11 @@ export async function GET() {
   wsBal.getColumn(1).width = 35;
   moneyFmt(wsBal.getColumn(2));
 
-  // DRE por exercício
-  const exs = await db.select().from(exercicios).where(eq(exercicios.empresa_id, emp.id));
+  // DRE por exercício (deduplica pelo ano — proteção contra dupes históricos)
+  const exsRaw = await db.select().from(exercicios).where(eq(exercicios.empresa_id, emp.id));
+  const exsMap = new Map<number, (typeof exsRaw)[number]>();
+  for (const e of exsRaw) if (!exsMap.has(e.ano)) exsMap.set(e.ano, e);
+  const exs = Array.from(exsMap.values()).sort((a, b) => a.ano - b.ano);
   for (const ex of exs) {
     const linhas = await dre(emp.id, ex.ano);
     const ws = wb.addWorksheet(`DRE_${ex.ano}`);

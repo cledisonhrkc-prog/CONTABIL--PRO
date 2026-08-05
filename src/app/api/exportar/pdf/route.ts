@@ -123,7 +123,10 @@ export async function GET() {
   const top = await topDespesas(emp.id, 8);
   const reforma = await comparativoAntesDepois(emp.id);
   const anosReforma = await apuracaoReformaPorAno(emp.id);
-  const exs = await db.select().from(exercicios).where(eq(exercicios.empresa_id, emp.id));
+  const exsRaw = await db.select().from(exercicios).where(eq(exercicios.empresa_id, emp.id));
+  const exsMap = new Map<number, (typeof exsRaw)[number]>();
+  for (const e of exsRaw) if (!exsMap.has(e.ano)) exsMap.set(e.ano, e);
+  const exs = Array.from(exsMap.values()).sort((a, b) => a.ano - b.ano);
 
   const totalPagar = apRows.reduce((a, r) => a + r.a_pagar, 0);
   const totalCredMono = audit.reduce((a, r) => a + r.valor_credito, 0);

@@ -31,11 +31,9 @@ export default function ImportarPage() {
   const [cnpj, setCnpj] = useState("03000000000191");
   const [nome, setNome] = useState("EMPRESA IMPORTADA LTDA");
   const [running, setRunning] = useState(false);
-  const [seedRunning, setSeedRunning] = useState(false);
   const [progresso, setProgresso] = useState<{ fase: string; atual: number; total: number } | null>(null);
   const [resumo, setResumo] = useState<UploadLote | null>(null);
   const [erroGeral, setErroGeral] = useState<string>("");
-  const [qtdSeed, setQtdSeed] = useState(500);
 
   function onFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const list = e.target.files;
@@ -176,60 +174,6 @@ export default function ImportarPage() {
     setProgresso(null);
   }
 
-  async function seedDemo() {
-    if (!confirm(`Isso apaga TODOS os dados atuais e gera ${qtdSeed} NF-e fictícias. Confirmar?`)) return;
-    setSeedRunning(true);
-    setErroGeral("");
-    setResumo(null);
-    try {
-      const r = await fetch("/api/seed", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          qtd: qtdSeed, regime, anexo,
-          rbt12: rbt12 ? Number(rbt12) : null,
-          ano_inicio: 2025, ano_fim: 2027,
-        }),
-      });
-      const text = await r.text();
-      let j: {
-        ok: boolean;
-        result?: {
-          lotesProcessados: number;
-          lancamentos: number;
-          aliquotaEfetivaSimples: number;
-          rbt12Usado: number;
-          rbt12Estimado: boolean;
-          tempoMs: number;
-          auditoriaR08: { erros: number; creditoRecuperavel: number };
-        };
-        error?: string;
-      };
-      try { j = JSON.parse(text); }
-      catch { setErroGeral(`Resposta não-JSON (HTTP ${r.status}): ${text.substring(0, 250)}`); setSeedRunning(false); return; }
-
-      if (!j.ok) {
-        setErroGeral("Erro no servidor: " + (j.error ?? "desconhecido"));
-      } else if (j.result) {
-        setResumo({
-          processadas: j.result.lotesProcessados,
-          parseErros: [],
-          lancamentos: j.result.lancamentos,
-          tempoMs: j.result.tempoMs,
-          tempoParseMs: 0,
-          aliqEfetiva: j.result.aliquotaEfetivaSimples,
-          auditR08Erros: j.result.auditoriaR08.erros,
-          auditR08Credito: j.result.auditoriaR08.creditoRecuperavel,
-          rbt12: j.result.rbt12Usado,
-          rbt12Estimado: j.result.rbt12Estimado,
-        });
-      }
-    } catch (e) {
-      setErroGeral("Falha de rede: " + (e as Error).message);
-    }
-    setSeedRunning(false);
-  }
-
   const totalMB = (files.reduce((a, f) => a + f.size, 0) / 1024 / 1024).toFixed(2);
 
   return (
@@ -246,7 +190,7 @@ export default function ImportarPage() {
             </p>
           </div>
 
-          <div className="grid lg:grid-cols-2 gap-6">
+          <div className="grid lg:grid-cols-1 gap-6 max-w-3xl">
             <div className="bg-white border border-slate-200 rounded-lg p-6">
               <h2 className="font-semibold text-slate-800 mb-4">📤 Upload em massa de XMLs</h2>
               <div className="space-y-3">
@@ -302,30 +246,11 @@ export default function ImportarPage() {
               </div>
             </div>
 
-            <div className="bg-white border border-slate-200 rounded-lg p-6">
-              <h2 className="font-semibold text-slate-800 mb-4">🧪 Gerar Dados Fictícios (Demo)</h2>
-              <p className="text-sm text-slate-500 mb-4">
-                Popula com notas fictícias distribuídas em 2025-2027 (testa Pré-Reforma, Transição 2026 e Reforma 2027).
-              </p>
-              <div className="mb-3">
-                <label className="block text-xs font-medium text-slate-600 mb-1">Quantidade de notas</label>
-                <input type="number" value={qtdSeed} onChange={(e) => setQtdSeed(Number(e.target.value))} min={10} max={2000} className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm" />
-              </div>
-              <div className="grid grid-cols-4 gap-2 mb-3">
-                <button onClick={() => setQtdSeed(100)} className="text-xs bg-slate-100 hover:bg-slate-200 py-1 rounded">100</button>
-                <button onClick={() => setQtdSeed(300)} className="text-xs bg-slate-100 hover:bg-slate-200 py-1 rounded">300</button>
-                <button onClick={() => setQtdSeed(500)} className="text-xs bg-slate-100 hover:bg-slate-200 py-1 rounded">500</button>
-                <button onClick={() => setQtdSeed(1000)} className="text-xs bg-slate-100 hover:bg-slate-200 py-1 rounded">1000</button>
-              </div>
-              <button
-                onClick={seedDemo}
-                disabled={seedRunning}
-                className="w-full py-2.5 bg-amber-500 hover:bg-amber-600 disabled:bg-slate-300 text-white rounded-md font-medium"
-              >
-                {seedRunning ? "Gerando..." : `Gerar ${qtdSeed} NF-e Fictícias`}
-              </button>
-              <p className="text-xs text-amber-700 mt-2">⚠️ Isso apaga TODOS os dados atuais.</p>
-            </div>
+          </div>
+
+          <div className="mt-4 text-xs text-slate-400">
+            💡 Precisa popular dados fictícios pra teste interno? Vá em{" "}
+            <a href="/setup" className="text-slate-600 underline">/setup</a>.
           </div>
 
           {progresso && (

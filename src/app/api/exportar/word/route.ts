@@ -111,7 +111,10 @@ export async function GET() {
   const bal = await balanco(emp.id);
   const apRows = await apuracao(emp.id);
   const audit = await auditoriaR08(emp.id);
-  const exs = await db.select().from(exercicios).where(eq(exercicios.empresa_id, emp.id));
+  const exsRaw = await db.select().from(exercicios).where(eq(exercicios.empresa_id, emp.id));
+  const exsMap = new Map<number, (typeof exsRaw)[number]>();
+  for (const e of exsRaw) if (!exsMap.has(e.ano)) exsMap.set(e.ano, e);
+  const exs = Array.from(exsMap.values()).sort((a, b) => a.ano - b.ano);
   const reforma = await comparativoAntesDepois(emp.id);
 
   const totalApagar = apRows.reduce((a, r) => a + r.a_pagar, 0);

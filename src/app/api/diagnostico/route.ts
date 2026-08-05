@@ -119,17 +119,33 @@ export async function GET() {
   }
 }
 
-// POST /api/diagnostico?auto=1 -> tenta criar tabelas e popular plano de contas
+// POST /api/diagnostico?auto=1     -> cria tabelas + popula plano de contas
+// POST /api/diagnostico?reset=1    -> LIMPA TODOS OS DADOS (mantém tabelas)
 export async function POST(req: Request) {
   const url = new URL(req.url);
   const auto = url.searchParams.get("auto") === "1";
+  const reset = url.searchParams.get("reset") === "1";
   const t0 = Date.now();
   const passos: string[] = [];
 
   try {
+    if (reset) {
+      passos.push("1. LIMPANDO todos os dados (mantém tabelas)...");
+      await db.execute(sql`
+        TRUNCATE lancamento_itens, lancamentos, auditoria, contas_receber,
+                 contas_pagar, apuracao_impostos, exercicios, itens_nf,
+                 notas_fiscais, bancos, empresas
+        RESTART IDENTITY CASCADE
+      `);
+      passos.push("   ✓ Dados apagados");
+
+      passos.push("2. Repopulando plano de contas padrão...");
+      await db.execute(sql`DELETE FROM plano_contas`);
+      await db.insert(planoContas).values(PLANO_CONTAS_PADRAO);
+      passos.push("   ✓ Plano de contas repopulado");
+    }
     if (auto) {
       passos.push("1. Verificando/criando tabelas via CREATE IF NOT EXISTS...");
-      // Executa o mesmo SQL do drizzle-kit generate
       await db.execute(sql.raw(SQL_CREATE_TABLES));
       passos.push("   ✓ Tabelas criadas/verificadas");
 
@@ -146,7 +162,9 @@ export async function POST(req: Request) {
       ok: true,
       passos,
       tempo_ms: Date.now() - t0,
-      proxima_acao: "Agora vá em /importar e clique em 'Gerar 1000 NF-e Fictícias'.",
+      proxima_acao: reset
+        ? "Banco limpo. Vá em /importar para subir os XMLs do cliente."
+        : "Banco pronto. Vá em /importar para subir os XMLs do cliente.",
     });
   } catch (e) {
     return NextResponse.json(

@@ -11,7 +11,10 @@ export const dynamic = "force-dynamic";
 export default async function DrePage() {
   const emp = await getEmpresaAtiva();
   if (!emp) return <AppLayout><div className="text-center py-16 text-slate-500">Sem empresa</div></AppLayout>;
-  const exs = await db.select().from(exercicios).where(eq(exercicios.empresa_id, emp.id));
+  const exsRaw = await db.select().from(exercicios).where(eq(exercicios.empresa_id, emp.id));
+  const exsMap = new Map<number, (typeof exsRaw)[number]>();
+  for (const e of exsRaw) if (!exsMap.has(e.ano)) exsMap.set(e.ano, e);
+  const exs = Array.from(exsMap.values()).sort((a, b) => a.ano - b.ano);
   const bal = await balanco(emp.id);
   const dres = await Promise.all(exs.map(async (e) => ({ ano: e.ano, linhas: await dre(emp.id, e.ano) })));
 
