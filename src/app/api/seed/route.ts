@@ -21,6 +21,7 @@ import { PLANO_CONTAS_PADRAO } from "@/lib/plano-contas";
 import { garantirEmpresa } from "@/lib/empresa";
 
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 export const maxDuration = 60;
 
 export async function POST(req: Request) {

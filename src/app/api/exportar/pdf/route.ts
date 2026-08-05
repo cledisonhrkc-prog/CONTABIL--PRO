@@ -17,6 +17,7 @@ import { exercicios } from "@/db/schema";
 import { eq } from "drizzle-orm";
 
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 export const maxDuration = 60;
 
 // Paleta de cores nível sênior
