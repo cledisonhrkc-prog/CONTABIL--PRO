@@ -43,11 +43,14 @@ export default async function Home() {
             Nenhuma empresa cadastrada ainda. Clique no botão abaixo para popular o sistema com 1000 notas fiscais fictícias e explorar todas as funcionalidades.
           </p>
           <Link
-            href="/importar"
+            href="/setup"
             className="inline-block px-6 py-3 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 transition"
           >
-            Começar (Importar XMLs ou Gerar Demo)
+            🔧 Configurar Banco / Gerar Demo
           </Link>
+          <p className="text-xs text-slate-400 mt-3">
+            Se for a primeira vez, essa tela detecta e cria as tabelas no Supabase automaticamente.
+          </p>
         </div>
       </AppLayout>
     );
