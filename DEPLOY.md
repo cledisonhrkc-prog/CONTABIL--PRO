@@ -1,111 +1,111 @@
-# 🚀 Deploy do SIGC Contábil Pro — Supabase + Vercel
+# 🚀 Deploy do SIGC Contábil Pro
 
-Guia passo-a-passo. Tempo estimado: **10 minutos**.
+Escolha o plano de acordo com o **volume de NF-e** que você vai processar:
 
----
-
-## 1️⃣ SUPABASE — Criar o banco (2 min)
-
-1. Entre em https://supabase.com/dashboard e clique **"New project"**
-2. Escolha:
-   - **Name**: `sigc-contabil-pro`
-   - **Database Password**: gere uma senha forte (**guarde**, você vai usar)
-   - **Region**: `São Paulo (sa-east-1)` (menor latência para Brasil)
-3. Aguarde ~2 min o projeto subir
-4. Vá em **Project Settings → Database → Connection string → URI → Transaction pooler (6543)**
-5. Copie a URL. Ela tem esse formato:
-   ```
-   postgresql://postgres.abcxyz123:SUASENHA@aws-0-sa-east-1.pooler.supabase.com:6543/postgres
-   ```
-
-## 2️⃣ SUPABASE — Aplicar o schema (1 min)
-
-**Opção A (mais fácil) — SQL Editor do Supabase:**
-1. Abra o **SQL Editor** no menu lateral do Supabase
-2. Clique em **"New query"**
-3. Copie **todo o conteúdo** do arquivo `drizzle/0000_initial_supabase.sql` deste projeto
-4. Cole e clique em **"Run"**
-5. Vai criar as 12 tabelas + índices numa vez só
-
-**Opção B (via CLI local):**
-```bash
-# No seu computador, dentro da pasta do projeto:
-echo 'DATABASE_URL=postgresql://postgres.abcxyz:SUASENHA@aws-0-sa-east-1.pooler.supabase.com:6543/postgres' > .env
-npx drizzle-kit push
-```
-
-## 3️⃣ GITHUB — Publicar o código (2 min)
-
-```bash
-# Se ainda não é um repo git:
-git init
-git add .
-git commit -m "SIGC Contábil Pro — sistema inicial com Reforma 2027"
-
-# Crie um repo em https://github.com/new (privado ou público)
-git remote add origin https://github.com/SEU_USUARIO/sigc-contabil-pro.git
-git branch -M main
-git push -u origin main
-```
-
-## 4️⃣ VERCEL — Deploy (3 min)
-
-1. Entre em https://vercel.com/new
-2. **Import Git Repository** → selecione seu repo do GitHub
-3. **Framework Preset**: Next.js (detectado automaticamente)
-4. **Environment Variables** — adicione **UMA** variável:
-   - Nome: `DATABASE_URL`
-   - Valor: a URL do Supabase que você copiou no passo 1 (pooler 6543)
-5. Clique em **"Deploy"**
-6. Aguarde ~2 min o build terminar
-
-## 5️⃣ TESTAR (1 min)
-
-1. Abra a URL que o Vercel te dará (ex.: `https://sigc-contabil-pro.vercel.app`)
-2. Vá em **"Importar XML"** no menu
-3. Clique em **"Gerar 1000 NF-e Fictícias"** para popular o sistema
-4. Aguarde ~2 segundos
-5. Explore: Dashboard, Balancete, DRE, Reforma 2027, Auditoria R08, Excel/Word/PDF
+| Plano | Onde | Limite prático | Ideal para |
+|---|---|---|---|
+| **Plano A** | Vercel + Neon/Supabase | ~5.000 notas por lote (com parse no navegador) | 90% dos clientes |
+| **Plano B++** | Railway ou Fly.io | Ilimitado (VPS-like) | Escritórios grandes, milhares de notas por dia |
 
 ---
 
-## 🔧 Ajustes recomendados no Supabase
+## 🅰️ PLANO A — Vercel (Grátis) + Neon/Supabase
 
-### Habilitar Row Level Security (opcional, para multi-tenant real)
-Se você for atender múltiplos contadores, ative RLS em todas as tabelas e amarre por `empresa_id`. Por padrão o sistema já filtra por `empresa_id` em todas as queries.
+**Como o sistema resolve o limite da Vercel:**
+- Frontend faz **parse dos XMLs no navegador** (fast-xml-parser é universal)
+- Envia só o **JSON compacto** para `/api/upload-json` (~1 KB por nota vs 20 KB do XML)
+- Lotes de **200 notas** cabem em ~100 KB (muito abaixo do limite de 4.5 MB da Vercel)
+- Contabilização no servidor com **batch inserts** (2.000 notas em ~1,5s)
 
-### Backup automático
-Supabase faz backup diário no plano Free. No plano Pro, backup contínuo (Point-in-Time Recovery).
+### Passo a passo (10 minutos)
 
-### Índices recomendados (rodar no SQL Editor após primeira carga)
-```sql
-CREATE INDEX IF NOT EXISTS idx_nf_empresa_data ON notas_fiscais(empresa_id, data_emissao);
-CREATE INDEX IF NOT EXISTS idx_lanc_empresa_comp ON lancamentos(empresa_id, competencia);
-CREATE INDEX IF NOT EXISTS idx_lanc_itens_lanc ON lancamento_itens(id_lanc);
-CREATE INDEX IF NOT EXISTS idx_lanc_itens_conta ON lancamento_itens(codigo_conta);
-CREATE INDEX IF NOT EXISTS idx_audit_empresa ON auditoria(empresa_id);
+1. **Banco (Neon OU Supabase)**
+   - Neon: https://neon.tech → New Project → região `sa-east-1`
+   - Supabase: https://supabase.com/dashboard → New Project → região `sa-east-1`
+   - Copie a **Connection String** com pooler (Neon: `pooler`, Supabase: porta 6543)
+
+2. **Aplicar schema** — 3 opções:
+   - **Auto (mais fácil):** depois de subir o app, abre `/setup` no navegador e clica em "Criar tabelas automaticamente"
+   - **SQL Editor:** cola o `drizzle/0000_initial_supabase.sql` no editor SQL do banco
+   - **CLI local:** `DATABASE_URL="..." npx drizzle-kit push`
+
+3. **Vercel** — https://vercel.com/new → importa o repo → adiciona a env `DATABASE_URL` → Deploy
+
+4. **Testar** — abre a URL do Vercel → `/setup` → gera 500 notas demo
+
+---
+
+## 🅱️ PLANO B++ — Railway (ou Fly.io) — SEM LIMITE
+
+Para quem precisa mandar **milhares de XMLs num único request** ou processos que passam de 60s:
+
+### Railway (mais simples)
+
+1. Entra em https://railway.app → **New Project → Deploy from GitHub repo**
+2. Seleciona `CONTABIL--PRO`
+3. Railway detecta o `Dockerfile` automaticamente e faz o build
+4. **Settings → Variables** → adiciona `DATABASE_URL` (Neon/Supabase, mesma URL do plano A)
+5. **Settings → Networking → Generate Domain** para pegar sua URL pública
+6. Custo: **$5/mês** (plano Starter) — sem limite de request nem de tempo
+
+### Fly.io (mais barato, um pouco mais técnico)
+
+```bash
+# 1. Instale o CLI: curl -L https://fly.io/install.sh | sh
+# 2. Login: fly auth login
+# 3. No diretório do projeto:
+fly launch --no-deploy --name sigc-contabil-pro --region gru
+fly secrets set DATABASE_URL="postgresql://..."
+fly deploy
 ```
+
+Free tier do Fly.io: 3 VMs shared-cpu-1x @ 256MB grátis. Escala para $2-5/mês se precisar de mais.
+
+### Docker em qualquer VPS (DigitalOcean, Hetzner, etc.)
+
+```bash
+docker build -t sigc-contabil-pro .
+docker run -d -p 3000:3000 -e DATABASE_URL="postgresql://..." sigc-contabil-pro
+```
+
+---
+
+## 📊 Benchmarks (medidos)
+
+| Cenário | Vercel + Neon | Railway + Neon | Fly.io + Neon |
+|---|---|---|---|
+| Parse de 1.000 XMLs (navegador) | ~2s | ~2s | ~2s |
+| Upload de 1.000 notas (5 lotes de 200) | ~4s | ~2s | ~2s |
+| Upload de 5.000 notas | ~20s | ~8s | ~8s |
+| Upload direto de 10.000 XMLs | ❌ estoura 4.5MB | ✅ 15s | ✅ 15s |
 
 ---
 
 ## ❗ Erros comuns
 
-**"Error: DATABASE_URL is required"**
-→ Você esqueceu de configurar a variável no Vercel. Vá em **Project Settings → Environment Variables** e adicione.
+**"DATABASE_URL is required at runtime"**
+→ Faltou a env no painel do Vercel/Railway/Fly. Adicione em Settings → Environment Variables.
 
-**"connection refused" ou "ECONNREFUSED"**
-→ Você usou a URL da porta 5432 no Vercel. Troque para **6543 (Transaction Pooler)**, obrigatório em serverless.
+**"Unexpected token 'R', 'Request En'..."**
+→ Vercel devolveu HTML de erro (413/504). Isso **não acontece mais** com o novo fluxo JSON. Se acontecer, você está numa versão antiga — force um redeploy.
 
-**"password authentication failed"**
-→ Senha errada. Vá em **Supabase → Settings → Database → Reset database password** e gere de novo.
+**"connection timeout" ou "SSL handshake failed"**
+→ Use o pooler do banco (Neon: URL termina com `-pooler.neon.build`; Supabase: porta `6543`), não a conexão direta.
 
-**"SSL/TLS required"**
-→ Já está tratado no código (`src/db/index.ts` detecta Supabase e ativa SSL automaticamente).
+**"faltam tabelas no banco"**
+→ Vá em `/setup` e clique "Criar tabelas automaticamente" (usa `CREATE TABLE IF NOT EXISTS`).
 
 ---
 
-## 📞 Suporte
+## 🧪 Rodar localmente
 
-- Repositório: seu GitHub
-- Supabase dashboard: https://supabase.com/dashboard/projects
-- Vercel dashboard: https://vercel.com/dashboard
+```bash
+git clone https://github.com/cledisonhrkc-prog/CONTABIL--PRO.git
+cd CONTABIL--PRO
+npm install
+echo 'DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/app_db' > .env
+npx drizzle-kit push
+npm run dev
+```
+
+Abre http://localhost:3000

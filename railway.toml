@@ -1,0 +1,14 @@
+# Railway.app config — SIGC Contábil Pro
+# Deploy: (1) crie projeto no Railway, (2) conecte o repo GitHub,
+# (3) adicione a variável DATABASE_URL nas Settings.
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+startCommand = "npm run start"
+healthcheckPath = "/api/health"
+healthcheckTimeout = 100
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 3

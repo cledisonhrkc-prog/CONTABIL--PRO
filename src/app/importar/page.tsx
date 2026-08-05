@@ -3,12 +3,14 @@
 import { useState } from "react";
 import Sidebar from "@/components/Sidebar";
 import Topbar from "@/components/Topbar";
+import { parseNfeXml, type NF } from "@/lib/nfe-parser";
 
 type UploadLote = {
   processadas: number;
-  erros: Array<{ arquivo: string; erro: string }>;
+  parseErros: Array<{ arquivo: string; erro: string }>;
   lancamentos: number;
   tempoMs: number;
+  tempoParseMs: number;
   aliqEfetiva: number;
   auditR08Erros: number;
   auditR08Credito: number;
@@ -16,10 +18,10 @@ type UploadLote = {
   rbt12Estimado: boolean;
 };
 
-// Vercel corta requests > 4.5MB e funções > 60s. Um XML de NF-e tem
-// ~10-30KB. Mandar 40 por lote = ~1MB, cabe folgado. Não paralelizar
-// pra não estourar o pool de conexões do Neon/Supabase.
-const CHUNK_SIZE = 40;
+// PLANO B: XMLs são parseados NO NAVEGADOR (fast-xml-parser é universal)
+// e enviados como JSON compacto. Payload de 200 notas ~ 100 KB (vs 4-8 MB de XML).
+// Assim damos volta no limite de 4.5 MB da Vercel sem esforço.
+const CHUNK_JSON = 200; // notas por request
 
 export default function ImportarPage() {
   const [files, setFiles] = useState<File[]>([]);
@@ -30,10 +32,10 @@ export default function ImportarPage() {
   const [nome, setNome] = useState("EMPRESA IMPORTADA LTDA");
   const [running, setRunning] = useState(false);
   const [seedRunning, setSeedRunning] = useState(false);
-  const [progresso, setProgresso] = useState<{ atual: number; total: number; msg: string } | null>(null);
+  const [progresso, setProgresso] = useState<{ fase: string; atual: number; total: number } | null>(null);
   const [resumo, setResumo] = useState<UploadLote | null>(null);
   const [erroGeral, setErroGeral] = useState<string>("");
-  const [qtdSeed, setQtdSeed] = useState(1000);
+  const [qtdSeed, setQtdSeed] = useState(500);
 
   function onFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const list = e.target.files;
@@ -44,10 +46,32 @@ export default function ImportarPage() {
     setResumo(null);
   }
 
-  async function enviarLote(chunk: File[]): Promise<{
+  // Parse local — MUITO rápido, tudo em memória do navegador
+  async function parseArquivosLocal(): Promise<{ nfs: NF[]; erros: Array<{ arquivo: string; erro: string }> }> {
+    const nfs: NF[] = [];
+    const erros: Array<{ arquivo: string; erro: string }> = [];
+    const cnpjLimpo = cnpj.replace(/\D/g, "");
+    for (let i = 0; i < files.length; i++) {
+      const f = files[i];
+      try {
+        const xml = await f.text();
+        nfs.push(parseNfeXml(xml, cnpjLimpo));
+      } catch (e) {
+        erros.push({ arquivo: f.name, erro: (e as Error).message.substring(0, 200) });
+      }
+      // Progresso a cada 50 arquivos (não spam)
+      if (i % 50 === 0 || i === files.length - 1) {
+        setProgresso({ fase: "🔍 Parseando XMLs no navegador", atual: i + 1, total: files.length });
+        // Yield ao browser pra não travar a UI
+        await new Promise((r) => setTimeout(r, 0));
+      }
+    }
+    return { nfs, erros };
+  }
+
+  async function enviarLoteJson(nfs: NF[]): Promise<{
     ok: boolean;
     processadas?: number;
-    erros?: Array<{ arquivo: string; erro: string }>;
     result?: {
       lancamentos: number;
       aliquotaEfetivaSimples: number;
@@ -58,36 +82,32 @@ export default function ImportarPage() {
     };
     error?: string;
   }> {
-    const fd = new FormData();
-    for (const f of chunk) fd.append("files", f);
-    fd.append("regime", regime);
-    fd.append("anexo", anexo);
-    fd.append("cnpj", cnpj);
-    fd.append("nome", nome);
-    if (rbt12) fd.append("rbt12", rbt12);
-
     let resp: Response;
     try {
-      resp = await fetch("/api/upload", { method: "POST", body: fd });
+      resp = await fetch("/api/upload-json", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cnpj, nome, regime, anexo, rbt12: rbt12 ? Number(rbt12) : null, nfs }),
+      });
     } catch (e) {
       return { ok: false, error: "Falha de rede: " + (e as Error).message };
     }
-
-    // Ler como texto primeiro (evita "Unexpected token" quando volta HTML de erro)
     const text = await resp.text();
     if (!resp.ok) {
-      const msg =
-        resp.status === 413
-          ? `Lote muito grande (HTTP 413). Reduza CHUNK_SIZE. Bytes: ~${chunk.reduce((a, f) => a + f.size, 0)}`
-          : resp.status === 504
-          ? `Timeout no servidor (HTTP 504). Reduza CHUNK_SIZE ou aumente maxDuration.`
-          : `HTTP ${resp.status}: ${text.substring(0, 200)}`;
-      return { ok: false, error: msg };
+      return {
+        ok: false,
+        error:
+          resp.status === 413
+            ? `HTTP 413 (Payload too large). Reduza CHUNK_JSON (atual: ${CHUNK_JSON}).`
+            : resp.status === 504
+            ? `HTTP 504 (Timeout). Reduza CHUNK_JSON ou use plano B++ (Railway/Fly.io).`
+            : `HTTP ${resp.status}: ${text.substring(0, 250)}`,
+      };
     }
     try {
       return JSON.parse(text);
     } catch {
-      return { ok: false, error: "Resposta não-JSON: " + text.substring(0, 200) };
+      return { ok: false, error: "Resposta não-JSON: " + text.substring(0, 250) };
     }
   }
 
@@ -97,12 +117,24 @@ export default function ImportarPage() {
     setErroGeral("");
     setResumo(null);
 
-    const totalChunks = Math.ceil(files.length / CHUNK_SIZE);
+    const tParse0 = performance.now();
+    const { nfs, erros: parseErros } = await parseArquivosLocal();
+    const tParse = Math.round(performance.now() - tParse0);
+
+    if (nfs.length === 0) {
+      setErroGeral(`Nenhum XML válido. ${parseErros.length} arquivo(s) com erro de parse.`);
+      setRunning(false);
+      setProgresso(null);
+      return;
+    }
+
+    const totalChunks = Math.ceil(nfs.length / CHUNK_JSON);
     const acumulado: UploadLote = {
       processadas: 0,
-      erros: [],
+      parseErros,
       lancamentos: 0,
       tempoMs: 0,
+      tempoParseMs: tParse,
       aliqEfetiva: 0,
       auditR08Erros: 0,
       auditR08Credito: 0,
@@ -111,17 +143,16 @@ export default function ImportarPage() {
     };
 
     for (let i = 0; i < totalChunks; i++) {
-      const chunk = files.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
+      const chunk = nfs.slice(i * CHUNK_JSON, (i + 1) * CHUNK_JSON);
       setProgresso({
+        fase: `📤 Enviando para o servidor (lote ${i + 1}/${totalChunks})`,
         atual: i + 1,
         total: totalChunks,
-        msg: `Enviando lote ${i + 1}/${totalChunks} (${chunk.length} arquivos)...`,
       });
-
-      const r = await enviarLote(chunk);
+      const r = await enviarLoteJson(chunk);
       if (!r.ok) {
         setErroGeral(
-          `Falhou no lote ${i + 1}/${totalChunks}: ${r.error}. Já foram processados ${acumulado.processadas} arquivos.`
+          `Falhou no lote ${i + 1}/${totalChunks}: ${r.error}\n\nJá processados: ${acumulado.processadas} notas.`
         );
         setRunning(false);
         setProgresso(null);
@@ -129,7 +160,6 @@ export default function ImportarPage() {
         return;
       }
       acumulado.processadas += r.processadas ?? 0;
-      if (r.erros) acumulado.erros.push(...r.erros);
       if (r.result) {
         acumulado.lancamentos = r.result.lancamentos;
         acumulado.tempoMs += r.result.tempoMs ?? 0;
@@ -139,11 +169,6 @@ export default function ImportarPage() {
         acumulado.rbt12 = r.result.rbt12Usado;
         acumulado.rbt12Estimado = r.result.rbt12Estimado;
       }
-      setProgresso({
-        atual: i + 1,
-        total: totalChunks,
-        msg: `✓ ${acumulado.processadas} de ${files.length} arquivos processados.`,
-      });
     }
 
     setResumo(acumulado);
@@ -180,21 +205,18 @@ export default function ImportarPage() {
         };
         error?: string;
       };
-      try {
-        j = JSON.parse(text);
-      } catch {
-        setErroGeral(`Resposta não-JSON do servidor (HTTP ${r.status}): ${text.substring(0, 250)}`);
-        setSeedRunning(false);
-        return;
-      }
+      try { j = JSON.parse(text); }
+      catch { setErroGeral(`Resposta não-JSON (HTTP ${r.status}): ${text.substring(0, 250)}`); setSeedRunning(false); return; }
+
       if (!j.ok) {
         setErroGeral("Erro no servidor: " + (j.error ?? "desconhecido"));
       } else if (j.result) {
         setResumo({
           processadas: j.result.lotesProcessados,
-          erros: [],
+          parseErros: [],
           lancamentos: j.result.lancamentos,
           tempoMs: j.result.tempoMs,
+          tempoParseMs: 0,
           aliqEfetiva: j.result.aliquotaEfetivaSimples,
           auditR08Erros: j.result.auditoriaR08.erros,
           auditR08Credito: j.result.auditoriaR08.creditoRecuperavel,
@@ -216,15 +238,17 @@ export default function ImportarPage() {
       <div className="flex-1 flex flex-col min-w-0">
         <Topbar />
         <main className="flex-1 p-6">
-          <h1 className="text-2xl font-bold text-slate-800 mb-2">Importar NF-e (XML)</h1>
-          <p className="text-slate-500 mb-6">
-            Upload em lotes de {CHUNK_SIZE} arquivos por vez (evita limites da Vercel), com barra de progresso e tratamento de erro.
-          </p>
+          <div className="mb-6 bg-emerald-50 border-l-4 border-emerald-500 rounded p-4">
+            <h1 className="text-2xl font-bold text-slate-800 mb-1">Importar NF-e (XML) — Plano B ⚡</h1>
+            <p className="text-sm text-slate-700">
+              <b>Parse dos XMLs feito NO NAVEGADOR</b> (não pesa no servidor). Só o resumo estruturado é enviado como JSON.
+              Payload ~20× menor. Suporta <b>milhares de notas</b> na Vercel sem estourar os 4.5 MB.
+            </p>
+          </div>
 
           <div className="grid lg:grid-cols-2 gap-6">
-            {/* Upload */}
             <div className="bg-white border border-slate-200 rounded-lg p-6">
-              <h2 className="font-semibold text-slate-800 mb-4">📤 Upload de XMLs</h2>
+              <h2 className="font-semibold text-slate-800 mb-4">📤 Upload em massa de XMLs</h2>
               <div className="space-y-3">
                 <div>
                   <label className="block text-xs font-medium text-slate-600 mb-1">CNPJ da empresa</label>
@@ -236,7 +260,7 @@ export default function ImportarPage() {
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-xs font-medium text-slate-600 mb-1">Regime tributário</label>
+                    <label className="block text-xs font-medium text-slate-600 mb-1">Regime</label>
                     <select value={regime} onChange={(e) => setRegime(e.target.value)} className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm">
                       <option value="SIMPLES">Simples Nacional</option>
                       <option value="LUCRO_PRESUMIDO">Lucro Presumido</option>
@@ -246,11 +270,11 @@ export default function ImportarPage() {
                   <div>
                     <label className="block text-xs font-medium text-slate-600 mb-1">Anexo (Simples)</label>
                     <select value={anexo} onChange={(e) => setAnexo(e.target.value)} className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm">
-                      <option value="I">Anexo I — Comércio</option>
-                      <option value="II">Anexo II — Indústria</option>
-                      <option value="III">Anexo III — Serviços</option>
-                      <option value="IV">Anexo IV — Serviços especializados</option>
-                      <option value="V">Anexo V — Serviços de tecnologia</option>
+                      <option value="I">I — Comércio</option>
+                      <option value="II">II — Indústria</option>
+                      <option value="III">III — Serviços</option>
+                      <option value="IV">IV — Especializados</option>
+                      <option value="V">V — Tecnologia</option>
                     </select>
                   </div>
                 </div>
@@ -259,12 +283,12 @@ export default function ImportarPage() {
                   <input value={rbt12} onChange={(e) => setRbt12(e.target.value)} placeholder="Ex.: 600000" className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm" />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-1">Arquivos XML (múltiplos)</label>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">Arquivos XML (selecione centenas ou milhares)</label>
                   <input type="file" multiple accept=".xml" onChange={onFileChange} className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm" />
                   {files.length > 0 && (
-                    <div className="text-xs text-slate-500 mt-1">
-                      📦 {files.length} arquivo(s) · {totalMB} MB total ·
-                      {" "}<b>{Math.ceil(files.length / CHUNK_SIZE)} lote(s) de {CHUNK_SIZE}</b>
+                    <div className="text-xs text-slate-600 mt-1 space-y-0.5">
+                      <div>📦 <b>{files.length}</b> XMLs · {totalMB} MB no disco</div>
+                      <div>⚡ Vai virar {Math.ceil(files.length / CHUNK_JSON)} lote(s) JSON de ~{Math.min(files.length, CHUNK_JSON)} notas</div>
                     </div>
                   )}
                 </div>
@@ -273,23 +297,23 @@ export default function ImportarPage() {
                   disabled={running || files.length === 0}
                   className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 text-white rounded-md font-medium"
                 >
-                  {running ? "Enviando..." : `Enviar ${files.length} arquivo(s) e Contabilizar`}
+                  {running ? "Processando..." : `⚡ Processar ${files.length} XMLs`}
                 </button>
               </div>
             </div>
 
-            {/* Seed */}
             <div className="bg-white border border-slate-200 rounded-lg p-6">
               <h2 className="font-semibold text-slate-800 mb-4">🧪 Gerar Dados Fictícios (Demo)</h2>
               <p className="text-sm text-slate-500 mb-4">
-                Popula o sistema com notas fictícias distribuídas em 2025-2027 (para testar Pré-Reforma, Transição e Reforma 2027).
+                Popula com notas fictícias distribuídas em 2025-2027 (testa Pré-Reforma, Transição 2026 e Reforma 2027).
               </p>
               <div className="mb-3">
                 <label className="block text-xs font-medium text-slate-600 mb-1">Quantidade de notas</label>
                 <input type="number" value={qtdSeed} onChange={(e) => setQtdSeed(Number(e.target.value))} min={10} max={2000} className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm" />
               </div>
-              <div className="grid grid-cols-3 gap-2 mb-3">
-                <button onClick={() => setQtdSeed(200)} className="text-xs bg-slate-100 hover:bg-slate-200 py-1 rounded">200</button>
+              <div className="grid grid-cols-4 gap-2 mb-3">
+                <button onClick={() => setQtdSeed(100)} className="text-xs bg-slate-100 hover:bg-slate-200 py-1 rounded">100</button>
+                <button onClick={() => setQtdSeed(300)} className="text-xs bg-slate-100 hover:bg-slate-200 py-1 rounded">300</button>
                 <button onClick={() => setQtdSeed(500)} className="text-xs bg-slate-100 hover:bg-slate-200 py-1 rounded">500</button>
                 <button onClick={() => setQtdSeed(1000)} className="text-xs bg-slate-100 hover:bg-slate-200 py-1 rounded">1000</button>
               </div>
@@ -304,51 +328,46 @@ export default function ImportarPage() {
             </div>
           </div>
 
-          {/* Barra de progresso */}
           {progresso && (
             <div className="mt-6 bg-white border border-indigo-200 rounded-lg p-4">
               <div className="flex justify-between text-xs text-slate-600 mb-1">
-                <span>{progresso.msg}</span>
-                <span>{Math.round((progresso.atual / progresso.total) * 100)}%</span>
+                <span>{progresso.fase}</span>
+                <span>{progresso.atual}/{progresso.total} · {Math.round((progresso.atual / progresso.total) * 100)}%</span>
               </div>
               <div className="w-full bg-slate-200 rounded-full h-3 overflow-hidden">
-                <div
-                  className="bg-indigo-600 h-full transition-all duration-300"
-                  style={{ width: `${(progresso.atual / progresso.total) * 100}%` }}
-                />
+                <div className="bg-indigo-600 h-full transition-all duration-300" style={{ width: `${(progresso.atual / progresso.total) * 100}%` }} />
               </div>
             </div>
           )}
 
-          {/* Erro geral */}
           {erroGeral && (
             <div className="mt-6 bg-red-50 border border-red-200 rounded-lg p-5">
               <h3 className="font-semibold text-red-900 mb-2">❌ Erro</h3>
               <p className="text-sm text-red-800 font-mono whitespace-pre-wrap">{erroGeral}</p>
-              <div className="mt-4 text-xs text-red-700 space-y-1">
-                <p><b>Diagnóstico rápido:</b></p>
-                <p>• Se HTTP 413: seu lote é grande demais. Já mando em {CHUNK_SIZE} arquivos por vez — se ainda estourar, reduza.</p>
-                <p>• Se HTTP 504 / timeout: banco está lento. Verifique se está usando pooler do Neon/Supabase (porta 6543).</p>
-                <p>• Se &quot;column ... does not exist&quot;: o banco não tem as tabelas. Vá em <a href="/setup" className="underline">/setup</a> e clique &quot;Criar tabelas automaticamente&quot;.</p>
-                <p>• Se &quot;DATABASE_URL is required&quot;: falta configurar a variável no Vercel.</p>
+              <div className="mt-4 text-xs text-red-700 space-y-1 border-t border-red-200 pt-3">
+                <p><b>Diagnóstico:</b></p>
+                <p>• Se o erro persistir na Vercel, considere o <b>Plano B++</b> (Railway/Fly.io — sem limite de request/timeout). Veja <code className="bg-red-100 px-1">DEPLOY.md</code> no repositório.</p>
+                <p>• Verifique também <a href="/setup" className="underline">/setup</a> para conferir se as tabelas existem no banco.</p>
               </div>
             </div>
           )}
 
-          {/* Resumo de sucesso */}
           {resumo && !erroGeral && (
             <div className="mt-6 bg-emerald-50 border border-emerald-200 rounded-lg p-5">
               <h3 className="font-semibold text-emerald-900 mb-2">✅ Contabilização concluída</h3>
               <ul className="text-sm text-slate-700 space-y-1">
-                <li>📄 Notas processadas: <b>{resumo.processadas}</b></li>
+                <li>📄 Notas processadas: <b>{resumo.processadas.toLocaleString("pt-BR")}</b></li>
                 <li>📝 Lançamentos totais: <b>{resumo.lancamentos.toLocaleString("pt-BR")}</b></li>
-                <li>⚡ Tempo total: <b>{resumo.tempoMs.toLocaleString("pt-BR")} ms</b></li>
+                {resumo.tempoParseMs > 0 && (
+                  <li>🔍 Parse no navegador: <b>{resumo.tempoParseMs.toLocaleString("pt-BR")} ms</b> ({(resumo.tempoParseMs / Math.max(1, resumo.processadas)).toFixed(1)} ms/nota)</li>
+                )}
+                <li>💾 Contabilização no servidor: <b>{resumo.tempoMs.toLocaleString("pt-BR")} ms</b></li>
                 {regime === "SIMPLES" && resumo.rbt12 > 0 && (
                   <li>💰 RBT12 {resumo.rbt12Estimado ? "estimado" : "informado"}: R$ {resumo.rbt12.toLocaleString("pt-BR")} → alíquota efetiva <b>{(resumo.aliqEfetiva * 100).toFixed(4)}%</b></li>
                 )}
                 <li>🔍 Auditoria R08: <b>{resumo.auditR08Erros}</b> erros · R$ {resumo.auditR08Credito.toLocaleString("pt-BR")} recuperável</li>
-                {resumo.erros.length > 0 && (
-                  <li>⚠️ {resumo.erros.length} arquivo(s) com erro de parse</li>
+                {resumo.parseErros.length > 0 && (
+                  <li>⚠️ {resumo.parseErros.length} XML(s) com erro de parse (ignorados)</li>
                 )}
               </ul>
               <div className="mt-4 flex flex-wrap gap-3">

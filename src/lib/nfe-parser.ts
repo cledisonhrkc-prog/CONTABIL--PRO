@@ -1,3 +1,5 @@
+// Parser universal — funciona tanto em Node.js (servidor) quanto no navegador.
+// fast-xml-parser não tem dependências nativas, roda em qualquer lugar.
 import { XMLParser } from "fast-xml-parser";
 
 export type ItemNF = {
