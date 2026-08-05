@@ -17,10 +17,13 @@ function detectSsl(url: string): boolean {
     url.includes("supabase.co") ||
     url.includes("supabase.com") ||
     url.includes("neon.tech") ||
+    url.includes("neon.build") ||
     url.includes("render.com") ||
     url.includes("amazonaws") ||
     url.includes("azure") ||
-    url.includes("sslmode=require")
+    url.includes("pooler") ||
+    url.includes("sslmode=require") ||
+    url.includes("sslmode=prefer")
   );
 }
 

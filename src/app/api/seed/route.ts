@@ -23,6 +23,7 @@ import { garantirEmpresa } from "@/lib/empresa";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 export const maxDuration = 60;
+export const preferredRegion = ["gru1"]; // São Paulo, mais perto do Neon/Supabase BR
 
 export async function POST(req: Request) {
   try {
