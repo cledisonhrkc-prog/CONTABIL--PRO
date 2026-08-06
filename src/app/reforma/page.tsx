@@ -22,7 +22,7 @@ export default async function ReformaPage() {
         <div className="text-center py-16 text-slate-500">
           Sem empresa cadastrada.{" "}
           <a className="text-indigo-600 underline" href="/importar">
-            Importe XMLs ou gere demo
+            Importe XMLs para começar
           </a>
         </div>
       </AppLayout>
@@ -146,7 +146,7 @@ export default async function ReformaPage() {
               {anos.length === 0 && (
                 <tr>
                   <td colSpan={11} className="text-center py-8 text-slate-400">
-                    Sem dados. <a href="/importar" className="text-indigo-600 underline">Gere um lote de teste</a> com notas de 2025, 2026 e 2027.
+                    Sem dados. <a href="/importar" className="text-indigo-600 underline">Importe XMLs</a> para ver o impacto da Reforma nos números da empresa.
                   </td>
                 </tr>
               )}

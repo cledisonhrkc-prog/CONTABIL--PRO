@@ -15,7 +15,6 @@ export default function SetupPage() {
   const [diag, setDiag] = useState<Diag | null>(null);
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState<string>("");
-  const [seeding, setSeeding] = useState(false);
 
   async function rodarDiag() {
     setLoading(true);
@@ -32,7 +31,7 @@ export default function SetupPage() {
 
   async function autoCriar() {
     setLoading(true);
-    setMsg("Criando tabelas no Supabase...");
+    setMsg("Criando tabelas no banco...");
     try {
       const r = await fetch("/api/diagnostico?auto=1", { method: "POST" });
       const j = await r.json();
@@ -42,28 +41,6 @@ export default function SetupPage() {
       setMsg("Erro: " + (e as Error).message);
     }
     setLoading(false);
-  }
-
-  async function seedDemo(qtd: number) {
-    setSeeding(true);
-    setMsg(`Gerando ${qtd} notas fiscais fictícias (~${Math.ceil(qtd / 300)}s)...`);
-    try {
-      const r = await fetch("/api/seed", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ qtd, regime: "SIMPLES", anexo: "I", rbt12: 600000, ano_inicio: 2025, ano_fim: 2027 }),
-      });
-      const j = await r.json();
-      if (j.ok) {
-        setMsg(`✅ ${j.result.lotesProcessados} notas processadas em ${j.result.tempoMs}ms. Redirecionando...`);
-        setTimeout(() => (window.location.href = "/"), 1500);
-      } else {
-        setMsg("❌ " + (j.error ?? "falhou"));
-      }
-    } catch (e) {
-      setMsg("Erro: " + (e as Error).message);
-    }
-    setSeeding(false);
   }
 
   useEffect(() => {
@@ -137,26 +114,21 @@ export default function SetupPage() {
               </div>
             )}
 
-            {/* Empresa não cadastrada mas banco OK */}
+            {/* Empresa não cadastrada mas banco OK — só mostra CTA pra importar XMLs reais */}
             {tabelasFaltando.length === 0 && (contagens.empresas ?? 0) === 0 && !!diag.detalhes.conexao_ok && (
               <div className="bg-indigo-50 border border-indigo-200 rounded p-4">
-                <p className="text-sm font-medium text-indigo-900 mb-3">
-                  💡 Banco pronto! Popular com dados fictícios para testar:
+                <p className="text-sm font-medium text-indigo-900 mb-1">
+                  ✅ Banco pronto e vazio, aguardando dados reais do cliente
                 </p>
-                <div className="flex flex-wrap gap-2">
-                  <button onClick={() => seedDemo(200)} disabled={seeding} className="px-4 py-2 bg-indigo-500 hover:bg-indigo-600 text-white rounded text-sm">
-                    ⚡ 200 notas (rápido)
-                  </button>
-                  <button onClick={() => seedDemo(500)} disabled={seeding} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded text-sm">
-                    500 notas
-                  </button>
-                  <button onClick={() => seedDemo(1000)} disabled={seeding} className="px-4 py-2 bg-indigo-700 hover:bg-indigo-800 text-white rounded text-sm">
-                    1000 notas (recomendado)
-                  </button>
-                </div>
-                <p className="text-xs text-indigo-700 mt-2">
-                  Distribuídas em 2025-2027 para testar Pré-Reforma, Transição e Reforma Tributária.
+                <p className="text-xs text-indigo-700 mb-3">
+                  Nenhuma empresa cadastrada. Importe os arquivos XML de NF-e do cliente para começar a escrituração.
                 </p>
+                <Link
+                  href="/importar"
+                  className="inline-block px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-md font-medium text-sm"
+                >
+                  📤 Ir para Importar XMLs
+                </Link>
               </div>
             )}
 
@@ -213,11 +185,11 @@ export default function SetupPage() {
                   <span className="text-3xl">🧹</span>
                   <div className="flex-1">
                     <p className="text-sm font-bold text-red-900">
-                      Novo cliente / Zerar demo — Apaga tudo do banco
+                      Zerar banco (Novo cliente)
                     </p>
                     <p className="text-xs text-red-800 mt-1">
                       Use este botão SEMPRE antes de atender um novo cliente.
-                      Apaga a empresa demo, todas as NFs, lançamentos, apuração, auditoria
+                      Apaga TODAS as empresas, NFs, lançamentos, apuração, auditoria
                       e reseta os IDs. O plano de contas padrão é mantido.
                     </p>
                     <button

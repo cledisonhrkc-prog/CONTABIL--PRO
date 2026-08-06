@@ -98,7 +98,7 @@ export async function GET() {
     // 5) Plano de contas populado?
     if (contagens.plano_contas === 0) {
       diag.proxima_acao =
-        "Plano de contas vazio. Chame POST /api/diagnostico?auto=1 para popular automaticamente, ou clique em 'Gerar Demo' na tela Importar XML.";
+        "Plano de contas vazio. Chame POST /api/diagnostico?auto=1 para popular automaticamente.";
     } else if (contagens.empresas === 0) {
       diag.proxima_acao =
         "Banco pronto, mas sem empresa. Vá em /importar e clique em 'Gerar 1000 NF-e Fictícias' para popular o sistema.";
