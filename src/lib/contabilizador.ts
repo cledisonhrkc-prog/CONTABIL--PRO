@@ -172,10 +172,12 @@ export async function contabilizarLote(input: ContabilizarInput): Promise<Contab
   const dupBanco = nfsUnicas.length - nfsProcessar.length;
 
   // ------- Alíquota efetiva do Simples (calculada sobre notas ÚNICAS) -------
+  // Base = SUM(vNF) puro das saídas venda/serviço, sem deduzir ST.
+  // Mesmo padrão do Colab v4.1.2 (LC 123/2006).
   const baseSaidaLote = round(
     nfsProcessar
       .filter((n) => n.tipo_operacao === "SAIDA" && (n.finalidade === "VENDA" || n.finalidade === "SERVICO"))
-      .reduce((a, n) => a + (n.valor_total - n.valor_icms_st), 0)
+      .reduce((a, n) => a + n.valor_total, 0)
   );
   const rbt12Real = input.rbt12 ?? null;
   const rbt12Estimado = !rbt12Real || rbt12Real <= 0;
