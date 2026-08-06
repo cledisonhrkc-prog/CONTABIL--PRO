@@ -327,6 +327,7 @@ CREATE TABLE IF NOT EXISTS "plano_contas" (
   "conta_pai" varchar(20)
 );
 CREATE INDEX IF NOT EXISTS idx_nf_empresa_data ON notas_fiscais(empresa_id, data_emissao);
+CREATE UNIQUE INDEX IF NOT EXISTS unq_nf_empresa_chave ON notas_fiscais(empresa_id, chave);
 CREATE INDEX IF NOT EXISTS idx_lanc_empresa_comp ON lancamentos(empresa_id, competencia);
 CREATE INDEX IF NOT EXISTS idx_lanc_itens_lanc ON lancamento_itens(id_lanc);
 CREATE INDEX IF NOT EXISTS idx_lanc_itens_conta ON lancamento_itens(codigo_conta);

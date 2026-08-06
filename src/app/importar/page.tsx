@@ -16,6 +16,9 @@ type UploadLote = {
   auditR08Credito: number;
   rbt12: number;
   rbt12Estimado: boolean;
+  dedup_recebidas: number;
+  dedup_no_lote: number;
+  dedup_no_banco: number;
 };
 
 // PLANO B: XMLs são parseados NO NAVEGADOR (fast-xml-parser é universal)
@@ -76,6 +79,12 @@ export default function ImportarPage() {
       rbt12Usado: number;
       rbt12Estimado: boolean;
       tempoMs?: number;
+      dedup?: {
+        recebidas: number;
+        duplicadas_no_lote: number;
+        duplicadas_no_banco: number;
+        unicas_processadas: number;
+      };
       auditoriaR08: { erros: number; creditoRecuperavel: number };
     };
     error?: string;
@@ -138,6 +147,9 @@ export default function ImportarPage() {
       auditR08Credito: 0,
       rbt12: 0,
       rbt12Estimado: false,
+      dedup_recebidas: 0,
+      dedup_no_lote: 0,
+      dedup_no_banco: 0,
     };
 
     for (let i = 0; i < totalChunks; i++) {
@@ -166,6 +178,11 @@ export default function ImportarPage() {
         acumulado.auditR08Credito += r.result.auditoriaR08.creditoRecuperavel;
         acumulado.rbt12 = r.result.rbt12Usado;
         acumulado.rbt12Estimado = r.result.rbt12Estimado;
+        if (r.result.dedup) {
+          acumulado.dedup_recebidas += r.result.dedup.recebidas;
+          acumulado.dedup_no_lote += r.result.dedup.duplicadas_no_lote;
+          acumulado.dedup_no_banco += r.result.dedup.duplicadas_no_banco;
+        }
       }
     }
 
@@ -223,8 +240,14 @@ export default function ImportarPage() {
                   </div>
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-1">RBT12 (opcional)</label>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">
+                    RBT12 — Receita Bruta últimos 12 meses (opcional)
+                  </label>
                   <input value={rbt12} onChange={(e) => setRbt12(e.target.value)} placeholder="Ex.: 600000" className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm" />
+                  <p className="text-[11px] text-slate-500 mt-1">
+                    ⚠️ NÃO é o faturamento do mês nem do lote. É o total dos <b>últimos 12 meses</b> da empresa.
+                    Se deixar vazio, o sistema estima (lote × 12).
+                  </p>
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-slate-600 mb-1">Arquivos XML (selecione centenas ou milhares)</label>
@@ -281,7 +304,15 @@ export default function ImportarPage() {
             <div className="mt-6 bg-emerald-50 border border-emerald-200 rounded-lg p-5">
               <h3 className="font-semibold text-emerald-900 mb-2">✅ Contabilização concluída</h3>
               <ul className="text-sm text-slate-700 space-y-1">
-                <li>📄 Notas processadas: <b>{resumo.processadas.toLocaleString("pt-BR")}</b></li>
+                <li>📄 Notas <b>ÚNICAS</b> processadas: <b>{resumo.processadas.toLocaleString("pt-BR")}</b></li>
+                {(resumo.dedup_no_lote > 0 || resumo.dedup_no_banco > 0) && (
+                  <li className="text-amber-700 bg-amber-50 px-2 py-1 rounded">
+                    ⚠️ <b>Deduplicação:</b> de {resumo.dedup_recebidas.toLocaleString("pt-BR")} XMLs recebidos,
+                    {" "}<b>{resumo.dedup_no_lote.toLocaleString("pt-BR")}</b> duplicados no próprio lote
+                    {resumo.dedup_no_banco > 0 && <> e <b>{resumo.dedup_no_banco.toLocaleString("pt-BR")}</b> já existiam no banco</>}
+                    . Isso é normal — pastas do SEFAZ trazem 2-3 XMLs por NF (autorização + eventos + cancelamento).
+                  </li>
+                )}
                 <li>📝 Lançamentos totais: <b>{resumo.lancamentos.toLocaleString("pt-BR")}</b></li>
                 {resumo.tempoParseMs > 0 && (
                   <li>🔍 Parse no navegador: <b>{resumo.tempoParseMs.toLocaleString("pt-BR")} ms</b> ({(resumo.tempoParseMs / Math.max(1, resumo.processadas)).toFixed(1)} ms/nota)</li>

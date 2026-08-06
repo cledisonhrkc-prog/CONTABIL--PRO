@@ -35,32 +35,39 @@ export const planoContas = pgTable("plano_contas", {
 });
 
 // ---------------- Notas Fiscais ----------------
-export const notasFiscais = pgTable("notas_fiscais", {
-  id: serial("id").primaryKey(),
-  empresa_id: integer("empresa_id").notNull(),
-  chave: varchar("chave", { length: 60 }),
-  numero: varchar("numero", { length: 20 }),
-  serie: varchar("serie", { length: 10 }),
-  modelo: varchar("modelo", { length: 5 }),
-  tipo_operacao: varchar("tipo_operacao", { length: 10 }), // ENTRADA | SAIDA
-  finalidade: varchar("finalidade", { length: 15 }), // VENDA | COMPRA | SERVICO
-  data_emissao: date("data_emissao"),
-  participante: text("participante"),
-  cnpj_part: varchar("cnpj_part", { length: 20 }),
-  valor_produtos: numeric("valor_produtos", { precision: 18, scale: 2 }).default("0"),
-  valor_frete: numeric("valor_frete", { precision: 18, scale: 2 }).default("0"),
-  valor_seguro: numeric("valor_seguro", { precision: 18, scale: 2 }).default("0"),
-  valor_desconto: numeric("valor_desconto", { precision: 18, scale: 2 }).default("0"),
-  valor_outras: numeric("valor_outras", { precision: 18, scale: 2 }).default("0"),
-  valor_total: numeric("valor_total", { precision: 18, scale: 2 }).default("0"),
-  valor_icms: numeric("valor_icms", { precision: 18, scale: 2 }).default("0"),
-  valor_icms_st: numeric("valor_icms_st", { precision: 18, scale: 2 }).default("0"),
-  valor_ipi: numeric("valor_ipi", { precision: 18, scale: 2 }).default("0"),
-  valor_pis: numeric("valor_pis", { precision: 18, scale: 2 }).default("0"),
-  valor_cofins: numeric("valor_cofins", { precision: 18, scale: 2 }).default("0"),
-  valor_iss: numeric("valor_iss", { precision: 18, scale: 2 }).default("0"),
-  created_at: timestamp("created_at").defaultNow(),
-});
+export const notasFiscais = pgTable(
+  "notas_fiscais",
+  {
+    id: serial("id").primaryKey(),
+    empresa_id: integer("empresa_id").notNull(),
+    chave: varchar("chave", { length: 60 }),
+    numero: varchar("numero", { length: 20 }),
+    serie: varchar("serie", { length: 10 }),
+    modelo: varchar("modelo", { length: 5 }),
+    tipo_operacao: varchar("tipo_operacao", { length: 10 }),
+    finalidade: varchar("finalidade", { length: 15 }),
+    data_emissao: date("data_emissao"),
+    participante: text("participante"),
+    cnpj_part: varchar("cnpj_part", { length: 20 }),
+    valor_produtos: numeric("valor_produtos", { precision: 18, scale: 2 }).default("0"),
+    valor_frete: numeric("valor_frete", { precision: 18, scale: 2 }).default("0"),
+    valor_seguro: numeric("valor_seguro", { precision: 18, scale: 2 }).default("0"),
+    valor_desconto: numeric("valor_desconto", { precision: 18, scale: 2 }).default("0"),
+    valor_outras: numeric("valor_outras", { precision: 18, scale: 2 }).default("0"),
+    valor_total: numeric("valor_total", { precision: 18, scale: 2 }).default("0"),
+    valor_icms: numeric("valor_icms", { precision: 18, scale: 2 }).default("0"),
+    valor_icms_st: numeric("valor_icms_st", { precision: 18, scale: 2 }).default("0"),
+    valor_ipi: numeric("valor_ipi", { precision: 18, scale: 2 }).default("0"),
+    valor_pis: numeric("valor_pis", { precision: 18, scale: 2 }).default("0"),
+    valor_cofins: numeric("valor_cofins", { precision: 18, scale: 2 }).default("0"),
+    valor_iss: numeric("valor_iss", { precision: 18, scale: 2 }).default("0"),
+    created_at: timestamp("created_at").defaultNow(),
+  },
+  (t) => ({
+    // Dedup HARD no banco: mesma chave para mesma empresa NUNCA duplica
+    unqEmpresaChave: uniqueIndex("unq_nf_empresa_chave").on(t.empresa_id, t.chave),
+  })
+);
 
 // ---------------- Itens NF ----------------
 export const itensNf = pgTable("itens_nf", {

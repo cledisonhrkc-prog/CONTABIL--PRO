@@ -88,6 +88,12 @@ export type ContabilizarResult = {
   rbt12Usado: number;
   rbt12Estimado: boolean;
   tempoMs: number;
+  dedup: {
+    recebidas: number;
+    duplicadas_no_lote: number;
+    duplicadas_no_banco: number;
+    unicas_processadas: number;
+  };
   auditoriaR08: {
     erros: number;
     creditoRecuperavel: number;
@@ -110,9 +116,43 @@ export async function contabilizarLote(input: ContabilizarInput): Promise<Contab
   const recupera_ipi = !!input.recupera_ipi;
   const aliqMono = aliqCreditoMono[regime];
 
-  // ------- Alíquota efetiva do Simples -------
+  // ============================================================
+  // FASE 0 — DEDUPLICAÇÃO POR CHAVE DE ACESSO
+  // Pastas do SEFAZ tipicamente têm 2-3 XMLs por NF (autorização + eventos +
+  // cancelamento + carta de correção). Sem dedup, o faturamento sai 2-3x
+  // maior que o real e a alíquota do Simples também fica errada.
+  // ============================================================
+  // 1) Dedup interno do próprio lote
+  const chavesVistas = new Set<string>();
+  const nfsUnicas: NF[] = [];
+  let dupNoLote = 0;
+  for (const nf of input.nfs) {
+    const key = (nf.chave || "").trim() || `${nf.numero}|${nf.serie}|${nf.valor_total}`;
+    if (chavesVistas.has(key)) {
+      dupNoLote++;
+      continue;
+    }
+    chavesVistas.add(key);
+    nfsUnicas.push(nf);
+  }
+  // 2) Dedup contra NFs JÁ existentes no banco (lotes anteriores do mesmo cliente)
+  // Usa array como UM ÚNICO parâmetro text[] para não estourar o limite de params do Postgres
+  const chavesArr = Array.from(chavesVistas);
+  let jaNoBanco = new Set<string>();
+  if (chavesArr.length > 0) {
+    const existentes = await db.execute<{ chave: string }>(sql`
+      SELECT chave FROM notas_fiscais
+      WHERE empresa_id = ${input.empresa_id}
+        AND chave = ANY(${sql.raw(`ARRAY[${chavesArr.map((c) => `'${c.replace(/'/g, "''")}'`).join(",")}]::text[]`)})
+    `);
+    jaNoBanco = new Set(existentes.rows.map((r) => r.chave));
+  }
+  const nfsProcessar = nfsUnicas.filter((nf) => !jaNoBanco.has(nf.chave));
+  const dupBanco = nfsUnicas.length - nfsProcessar.length;
+
+  // ------- Alíquota efetiva do Simples (calculada sobre notas ÚNICAS) -------
   const baseSaidaLote = round(
-    input.nfs
+    nfsProcessar
       .filter((n) => n.tipo_operacao === "SAIDA" && (n.finalidade === "VENDA" || n.finalidade === "SERVICO"))
       .reduce((a, n) => a + (n.valor_total - n.valor_icms_st), 0)
   );
@@ -128,7 +168,7 @@ export async function contabilizarLote(input: ContabilizarInput): Promise<Contab
   // ============================================================
   // FASE 1 — BATCH INSERT DAS NOTAS FISCAIS (uma única round-trip)
   // ============================================================
-  const nfPayload = input.nfs.map((nf) => ({
+  const nfPayload = nfsProcessar.map((nf) => ({
     empresa_id: input.empresa_id,
     chave: nf.chave,
     numero: nf.numero,
@@ -181,8 +221,8 @@ export async function contabilizarLote(input: ContabilizarInput): Promise<Contab
   const cpBatch: Array<typeof contasPagar.$inferInsert> = [];
   const lancamentosPreparados: LancPreparado[] = [];
 
-  for (let idx = 0; idx < input.nfs.length; idx++) {
-    const nf = input.nfs[idx];
+  for (let idx = 0; idx < nfsProcessar.length; idx++) {
+    const nf = nfsProcessar[idx];
     const nid = nids[idx];
     if (!nid) continue;
 
@@ -484,12 +524,18 @@ export async function contabilizarLote(input: ContabilizarInput): Promise<Contab
     .where(eq(lancamentos.empresa_id, input.empresa_id));
 
   return {
-    lotesProcessados: input.nfs.length,
+    lotesProcessados: nfsProcessar.length,
     lancamentos: Number(totalFinal[0]?.c ?? 0),
     aliquotaEfetivaSimples: aliqEfetiva,
     rbt12Usado,
     rbt12Estimado,
     tempoMs: Date.now() - t0,
+    dedup: {
+      recebidas: input.nfs.length,
+      duplicadas_no_lote: dupNoLote,
+      duplicadas_no_banco: dupBanco,
+      unicas_processadas: nfsProcessar.length,
+    },
     auditoriaR08: { erros: auditErros, creditoRecuperavel: auditCredito },
   };
 }
