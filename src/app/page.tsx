@@ -26,6 +26,7 @@ const ACESSOS = [
   { label: "Apuração", icon: "🧾", color: "bg-orange-500", href: "/apuracao" },
   { label: "Auditoria", icon: "🔍", color: "bg-purple-500", href: "/auditoria" },
   { label: "Reforma 2027", icon: "🇧🇷", color: "bg-green-600", href: "/reforma" },
+  { label: "Analisar IA", icon: "🤖", color: "bg-purple-600", href: "/analise-ia" },
   { label: "PDF", icon: "📄", color: "bg-red-700", href: "/api/exportar/pdf" },
   { label: "Excel", icon: "📗", color: "bg-green-700", href: "/api/exportar/excel" },
 ];

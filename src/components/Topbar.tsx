@@ -21,6 +21,7 @@ const ROTAS: Array<{ label: string; href: string; keywords: string }> = [
   { label: "Apuração de Impostos", href: "/apuracao", keywords: "apuracao imposto icms pis cofins iss das" },
   { label: "Auditoria R08", href: "/auditoria", keywords: "auditoria monofasico r08 pis cofins" },
   { label: "Reforma 2027", href: "/reforma", keywords: "reforma tributaria cbs ibs is 2027" },
+  { label: "Analisar com IA", href: "/analise-ia", keywords: "ia inteligencia artificial chatgpt claude gemini analise" },
   { label: "Relatórios", href: "/relatorios", keywords: "relatorios" },
   { label: "SPED / Exportar", href: "/exportar", keywords: "sped exportar pdf excel word" },
   { label: "Setup / Diagnóstico", href: "/setup", keywords: "setup diagnostico banco tabela" },
