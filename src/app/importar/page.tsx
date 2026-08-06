@@ -4,6 +4,7 @@ import { useState } from "react";
 import Sidebar from "@/components/Sidebar";
 import Topbar from "@/components/Topbar";
 import { parseNfeXml, type NF } from "@/lib/nfe-parser";
+import { preValidar, formatarPreValidacaoTexto, type PreValidacaoResumo } from "@/lib/pre-validacao";
 
 type UploadLote = {
   processadas: number;
@@ -38,6 +39,12 @@ export default function ImportarPage() {
   const [progresso, setProgresso] = useState<{ fase: string; atual: number; total: number } | null>(null);
   const [resumo, setResumo] = useState<UploadLote | null>(null);
   const [erroGeral, setErroGeral] = useState<string>("");
+
+  // Pré-validação por IA (bloqueia contabilização)
+  const [preValidacao, setPreValidacao] = useState<PreValidacaoResumo | null>(null);
+  const [textoIA, setTextoIA] = useState<string>("");
+  const [nfsParaContabilizar, setNfsParaContabilizar] = useState<NF[] | null>(null);
+  const [copiado, setCopiado] = useState(false);
 
   function onFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const list = e.target.files;
@@ -121,16 +128,16 @@ export default function ImportarPage() {
     }
   }
 
-  async function uploadCompleto() {
+  // PASSO 1: parse + pré-validação (NÃO contabiliza ainda — pausa pra IA revisar)
+  async function preValidarLote() {
     if (files.length === 0) return alert("Selecione arquivos XML");
     setRunning(true);
     setErroGeral("");
     setResumo(null);
+    setPreValidacao(null);
+    setNfsParaContabilizar(null);
 
-    const tParse0 = performance.now();
     const { nfs, erros: parseErros } = await parseArquivosLocal();
-    const tParse = Math.round(performance.now() - tParse0);
-
     if (nfs.length === 0) {
       setErroGeral(`Nenhum XML válido. ${parseErros.length} arquivo(s) com erro de parse.`);
       setRunning(false);
@@ -138,13 +145,30 @@ export default function ImportarPage() {
       return;
     }
 
+    setProgresso({ fase: "🔍 Executando pré-validação estruturada...", atual: 1, total: 1 });
+    const pv = preValidar(nfs);
+    const texto = formatarPreValidacaoTexto(pv);
+    setPreValidacao(pv);
+    setTextoIA(texto);
+    setNfsParaContabilizar(nfs);
+    setRunning(false);
+    setProgresso(null);
+  }
+
+  // PASSO 2: contabilizar APÓS aprovação humana da pré-validação
+  async function contabilizarAgora() {
+    const nfs = nfsParaContabilizar;
+    if (!nfs || nfs.length === 0) return;
+    setRunning(true);
+    setErroGeral("");
+
     const totalChunks = Math.ceil(nfs.length / CHUNK_JSON);
     const acumulado: UploadLote = {
       processadas: 0,
-      parseErros,
+      parseErros: [],
       lancamentos: 0,
       tempoMs: 0,
-      tempoParseMs: tParse,
+      tempoParseMs: 0,
       aliqEfetiva: 0,
       auditR08Erros: 0,
       auditR08Credito: 0,
@@ -159,18 +183,15 @@ export default function ImportarPage() {
     for (let i = 0; i < totalChunks; i++) {
       const chunk = nfs.slice(i * CHUNK_JSON, (i + 1) * CHUNK_JSON);
       setProgresso({
-        fase: `📤 Enviando para o servidor (lote ${i + 1}/${totalChunks})`,
+        fase: `📤 Contabilizando (lote ${i + 1}/${totalChunks})`,
         atual: i + 1,
         total: totalChunks,
       });
       const r = await enviarLoteJson(chunk);
       if (!r.ok) {
-        setErroGeral(
-          `Falhou no lote ${i + 1}/${totalChunks}: ${r.error}\n\nJá processados: ${acumulado.processadas} notas.`
-        );
+        setErroGeral(`Falhou no lote ${i + 1}: ${r.error}`);
         setRunning(false);
         setProgresso(null);
-        setResumo(acumulado.processadas > 0 ? acumulado : null);
         return;
       }
       acumulado.processadas += r.processadas ?? 0;
@@ -190,10 +211,21 @@ export default function ImportarPage() {
         }
       }
     }
-
     setResumo(acumulado);
+    setPreValidacao(null);
+    setNfsParaContabilizar(null);
     setRunning(false);
     setProgresso(null);
+  }
+
+  async function copiarTextoIA() {
+    try {
+      await navigator.clipboard.writeText(textoIA);
+      setCopiado(true);
+      setTimeout(() => setCopiado(false), 2500);
+    } catch {
+      alert("Não conseguiu copiar. Selecione manualmente.");
+    }
   }
 
   const totalMB = (files.reduce((a, f) => a + f.size, 0) / 1024 / 1024).toFixed(2);
@@ -265,12 +297,17 @@ export default function ImportarPage() {
                   )}
                 </div>
                 <button
-                  onClick={uploadCompleto}
+                  onClick={preValidarLote}
                   disabled={running || files.length === 0}
                   className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 text-white rounded-md font-medium"
                 >
-                  {running ? "Processando..." : `⚡ Processar ${files.length} XMLs`}
+                  {running ? "Analisando..." : `🔍 PASSO 1: Pré-validar ${files.length} XMLs (antes de contabilizar)`}
                 </button>
+                <p className="text-[11px] text-slate-500 mt-2">
+                  Vai parsear os XMLs no navegador e gerar um dossiê estruturado para você mandar
+                  na IA (ChatGPT/Claude/Gemini) analisar ANTES da contabilização. Nenhum dado é
+                  gravado ainda.
+                </p>
               </div>
             </div>
 
@@ -280,6 +317,121 @@ export default function ImportarPage() {
             💡 Precisa popular dados fictícios pra teste interno? Vá em{" "}
             <a href="/setup" className="text-slate-600 underline">/setup</a>.
           </div>
+
+          {preValidacao && !running && (
+            <div className="mt-6 space-y-4">
+              {/* Alerta topo */}
+              <div className="bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-lg p-5">
+                <div className="flex items-center gap-3">
+                  <span className="text-3xl">🔍</span>
+                  <div className="flex-1">
+                    <h2 className="text-lg font-bold">PASSO 1 concluído — Dossiê pronto pra IA</h2>
+                    <p className="text-sm text-purple-100">
+                      Os {preValidacao.total_xmls_recebidos} XMLs foram parseados e analisados. Nenhum dado foi gravado no banco ainda.
+                      Copie o dossiê, mande na IA de sua preferência, e SÓ DEPOIS clique em &quot;Contabilizar&quot;.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Resumo visual da pré-validação */}
+              <div className="grid md:grid-cols-4 gap-3">
+                <div className="bg-white border border-slate-200 rounded p-3">
+                  <div className="text-[10px] text-slate-500 font-bold">XMLs RECEBIDOS</div>
+                  <div className="text-2xl font-bold text-slate-800">{preValidacao.total_xmls_recebidos}</div>
+                </div>
+                <div className="bg-white border border-emerald-200 rounded p-3">
+                  <div className="text-[10px] text-emerald-700 font-bold">NOTAS VÁLIDAS ÚNICAS</div>
+                  <div className="text-2xl font-bold text-emerald-700">{preValidacao.totais_filtrados.qtd_notas_validas}</div>
+                  <div className="text-[10px] text-slate-500">após dedup + filtro cStat</div>
+                </div>
+                <div className="bg-white border border-slate-200 rounded p-3">
+                  <div className="text-[10px] text-slate-500 font-bold">FATURAMENTO LÍQUIDO</div>
+                  <div className="text-lg font-bold text-slate-800">R$ {preValidacao.totais_filtrados.faturamento_liquido_st.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</div>
+                </div>
+                <div className={`bg-white border rounded p-3 ${preValidacao.alertas.filter(a => a.severidade === "ERRO").length > 0 ? "border-red-300" : "border-slate-200"}`}>
+                  <div className="text-[10px] text-slate-500 font-bold">ALERTAS</div>
+                  <div className="text-2xl font-bold text-slate-800">{preValidacao.alertas.length}</div>
+                  <div className="text-[10px] text-slate-500">
+                    {preValidacao.alertas.filter(a => a.severidade === "ERRO").length} erros · {preValidacao.alertas.filter(a => a.severidade === "AVISO").length} avisos
+                  </div>
+                </div>
+              </div>
+
+              {/* Status SEFAZ */}
+              <div className="bg-white border border-slate-200 rounded-lg p-4">
+                <h3 className="font-semibold text-slate-800 mb-2">📋 Distribuição por Status SEFAZ (cStat)</h3>
+                <div className="flex flex-wrap gap-2 text-xs">
+                  {Object.entries(preValidacao.por_status).map(([cs, qtd]) => {
+                    const ok = cs === "100" || cs === "150";
+                    return (
+                      <div key={cs} className={`px-3 py-1.5 rounded ${ok ? "bg-emerald-50 text-emerald-800" : "bg-red-50 text-red-800"}`}>
+                        <b>cStat {cs}:</b> {qtd} nota(s) {ok ? "✓" : "✗ excluída(s)"}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Alertas críticos */}
+              {preValidacao.alertas.filter(a => a.severidade === "ERRO").length > 0 && (
+                <div className="bg-red-50 border border-red-300 rounded-lg p-4">
+                  <h3 className="font-semibold text-red-900 mb-2">🚨 Erros críticos detectados</h3>
+                  <ul className="text-xs text-red-900 space-y-1 max-h-40 overflow-y-auto">
+                    {preValidacao.alertas.filter(a => a.severidade === "ERRO").slice(0, 15).map((a, i) => (
+                      <li key={i}>• <b>[{a.categoria}]</b> {a.nota}: {a.descricao}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {/* Botões IA */}
+              <div className="bg-white border border-slate-200 rounded-lg p-5">
+                <h3 className="font-semibold text-slate-800 mb-3">🤖 Enviar dossiê pra IA validar (antes de gravar no banco)</h3>
+                <div className="flex flex-wrap gap-2 mb-3">
+                  <button
+                    onClick={copiarTextoIA}
+                    className={`px-5 py-2.5 rounded-md font-medium text-sm text-white ${copiado ? "bg-emerald-600" : "bg-purple-600 hover:bg-purple-700"}`}
+                  >
+                    {copiado ? "✅ Copiado! Cole na IA" : `📋 Copiar dossiê (${(textoIA.length / 1024).toFixed(0)} KB, ~${Math.ceil(textoIA.length / 4).toLocaleString("pt-BR")} tokens)`}
+                  </button>
+                  <a href="https://chatgpt.com/" target="_blank" rel="noopener" className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-md text-sm">🤖 ChatGPT</a>
+                  <a href="https://claude.ai/new" target="_blank" rel="noopener" className="px-4 py-2.5 bg-orange-600 hover:bg-orange-700 text-white rounded-md text-sm">🧠 Claude</a>
+                  <a href="https://gemini.google.com/" target="_blank" rel="noopener" className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-sm">✨ Gemini</a>
+                  <a href="https://grok.com/" target="_blank" rel="noopener" className="px-4 py-2.5 bg-slate-800 hover:bg-slate-900 text-white rounded-md text-sm">𝕏 Grok</a>
+                </div>
+                <details>
+                  <summary className="text-xs text-slate-500 cursor-pointer">👁️ Ver o dossiê completo (o que vai para a IA)</summary>
+                  <pre className="mt-2 bg-slate-900 text-slate-100 rounded p-3 text-[10px] max-h-96 overflow-auto whitespace-pre-wrap">
+                    {textoIA}
+                  </pre>
+                </details>
+              </div>
+
+              {/* Botão final */}
+              <div className="bg-emerald-50 border-2 border-emerald-400 rounded-lg p-5">
+                <h3 className="font-bold text-emerald-900 mb-2">✅ PASSO 2 — Após revisar com a IA, contabilize</h3>
+                <p className="text-sm text-emerald-800 mb-3">
+                  Quando a IA aprovar (ou você identificar que está OK), clique abaixo para gravar
+                  {" "}<b>{preValidacao.totais_filtrados.qtd_notas_validas} notas válidas únicas</b> no banco.
+                </p>
+                <div className="flex gap-2">
+                  <button
+                    onClick={contabilizarAgora}
+                    className="flex-1 px-5 py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-md font-bold text-sm"
+                  >
+                    ✅ CONTABILIZAR AGORA ({preValidacao.totais_filtrados.qtd_notas_validas} notas)
+                  </button>
+                  <button
+                    onClick={() => { setPreValidacao(null); setNfsParaContabilizar(null); setTextoIA(""); }}
+                    className="px-5 py-3 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 rounded-md font-medium text-sm"
+                  >
+                    ✗ Cancelar
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
 
           {progresso && (
             <div className="mt-6 bg-white border border-indigo-200 rounded-lg p-4">
