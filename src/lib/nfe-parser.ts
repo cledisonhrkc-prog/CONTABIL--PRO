@@ -39,6 +39,9 @@ export type NF = {
   valor_cofins: number;
   valor_iss: number;
   itens: ItemNF[];
+  // Status SEFAZ:  100=Autorizada · 101=Cancelada · 110=Denegada · 150=Autorizada fora prazo · outros=diversos
+  // Default 100 quando não vem no XML (NFe avulsa sem protocolo).
+  cStat: string;
 };
 
 const parser = new XMLParser({
@@ -188,11 +191,17 @@ export function parseNfeXml(xml: string, cnpjEmpresa: string): NF {
   if (v_iss > 0 && v_icms === 0) finalidade = "SERVICO";
   else finalidade = tipo_operacao === "SAIDA" ? "VENDA" : "COMPRA";
 
+  // Status SEFAZ — vem em nfeProc.protNFe.infProt.cStat
+  const nfeProc = (obj as { nfeProc?: { protNFe?: { infProt?: { cStat?: string | number } } } }).nfeProc;
+  const cStatRaw = nfeProc?.protNFe?.infProt?.cStat;
+  const cStat = cStatRaw != null ? String(cStatRaw) : "100"; // default = autorizada
+
   return {
     chave: chave || `${nNF}|${serie}|${v_nf}`,
     numero: nNF,
     serie,
     modelo: mod,
+    cStat,
     tipo_operacao,
     finalidade,
     data_emissao: dataEmissao,

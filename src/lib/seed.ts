@@ -191,6 +191,7 @@ export function gerarNotasFake(opts: SeedOptions): NF[] {
       numero: nNF,
       serie,
       modelo: mod,
+      cStat: "100", // demo: sempre autorizadas
       tipo_operacao: tipo,
       finalidade,
       data_emissao: dt,

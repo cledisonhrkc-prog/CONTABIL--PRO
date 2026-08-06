@@ -90,9 +90,11 @@ export type ContabilizarResult = {
   tempoMs: number;
   dedup: {
     recebidas: number;
+    canceladas_ou_denegadas: number;
     duplicadas_no_lote: number;
     duplicadas_no_banco: number;
     unicas_processadas: number;
+    rejeicoes_por_status: Record<string, number>;
   };
   auditoriaR08: {
     erros: number;
@@ -117,7 +119,26 @@ export async function contabilizarLote(input: ContabilizarInput): Promise<Contab
   const aliqMono = aliqCreditoMono[regime];
 
   // ============================================================
-  // FASE 0 — DEDUPLICAÇÃO POR CHAVE DE ACESSO
+  // FASE 0.1 — FILTRO DE NF-e CANCELADAS/DENEGADAS
+  // SEFAZ retorna cStat=101 (cancelada), 110/205/301 (denegada),
+  // 302 (denegada Uso), 205 (NF-e cancelada). NÃO CONTAR essas.
+  // Só cStat=100 (Autorizada) e 150 (Autorizada fora de prazo) entram.
+  // ============================================================
+  const STATUS_VALIDOS = new Set(["100", "150"]);
+  const nfsAutorizadas: NF[] = [];
+  const rejeicoesStatus: Record<string, number> = {};
+  for (const nf of input.nfs) {
+    const cs = String(nf.cStat ?? "100");
+    if (STATUS_VALIDOS.has(cs)) {
+      nfsAutorizadas.push(nf);
+    } else {
+      rejeicoesStatus[cs] = (rejeicoesStatus[cs] ?? 0) + 1;
+    }
+  }
+  const canceladasDenegadas = input.nfs.length - nfsAutorizadas.length;
+
+  // ============================================================
+  // FASE 0.2 — DEDUPLICAÇÃO POR CHAVE DE ACESSO
   // Pastas do SEFAZ tipicamente têm 2-3 XMLs por NF (autorização + eventos +
   // cancelamento + carta de correção). Sem dedup, o faturamento sai 2-3x
   // maior que o real e a alíquota do Simples também fica errada.
@@ -126,7 +147,7 @@ export async function contabilizarLote(input: ContabilizarInput): Promise<Contab
   const chavesVistas = new Set<string>();
   const nfsUnicas: NF[] = [];
   let dupNoLote = 0;
-  for (const nf of input.nfs) {
+  for (const nf of nfsAutorizadas) {
     const key = (nf.chave || "").trim() || `${nf.numero}|${nf.serie}|${nf.valor_total}`;
     if (chavesVistas.has(key)) {
       dupNoLote++;
@@ -532,9 +553,11 @@ export async function contabilizarLote(input: ContabilizarInput): Promise<Contab
     tempoMs: Date.now() - t0,
     dedup: {
       recebidas: input.nfs.length,
+      canceladas_ou_denegadas: canceladasDenegadas,
       duplicadas_no_lote: dupNoLote,
       duplicadas_no_banco: dupBanco,
       unicas_processadas: nfsProcessar.length,
+      rejeicoes_por_status: rejeicoesStatus,
     },
     auditoriaR08: { erros: auditErros, creditoRecuperavel: auditCredito },
   };

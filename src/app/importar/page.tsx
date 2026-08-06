@@ -17,6 +17,7 @@ type UploadLote = {
   rbt12: number;
   rbt12Estimado: boolean;
   dedup_recebidas: number;
+  dedup_canceladas: number;
   dedup_no_lote: number;
   dedup_no_banco: number;
 };
@@ -81,9 +82,11 @@ export default function ImportarPage() {
       tempoMs?: number;
       dedup?: {
         recebidas: number;
+        canceladas_ou_denegadas: number;
         duplicadas_no_lote: number;
         duplicadas_no_banco: number;
         unicas_processadas: number;
+        rejeicoes_por_status?: Record<string, number>;
       };
       auditoriaR08: { erros: number; creditoRecuperavel: number };
     };
@@ -148,6 +151,7 @@ export default function ImportarPage() {
       rbt12: 0,
       rbt12Estimado: false,
       dedup_recebidas: 0,
+      dedup_canceladas: 0,
       dedup_no_lote: 0,
       dedup_no_banco: 0,
     };
@@ -180,6 +184,7 @@ export default function ImportarPage() {
         acumulado.rbt12Estimado = r.result.rbt12Estimado;
         if (r.result.dedup) {
           acumulado.dedup_recebidas += r.result.dedup.recebidas;
+          acumulado.dedup_canceladas += r.result.dedup.canceladas_ou_denegadas;
           acumulado.dedup_no_lote += r.result.dedup.duplicadas_no_lote;
           acumulado.dedup_no_banco += r.result.dedup.duplicadas_no_banco;
         }
@@ -304,13 +309,18 @@ export default function ImportarPage() {
             <div className="mt-6 bg-emerald-50 border border-emerald-200 rounded-lg p-5">
               <h3 className="font-semibold text-emerald-900 mb-2">✅ Contabilização concluída</h3>
               <ul className="text-sm text-slate-700 space-y-1">
-                <li>📄 Notas <b>ÚNICAS</b> processadas: <b>{resumo.processadas.toLocaleString("pt-BR")}</b></li>
+                <li>📄 Notas <b>ÚNICAS AUTORIZADAS</b> processadas: <b>{resumo.processadas.toLocaleString("pt-BR")}</b></li>
+                {resumo.dedup_canceladas > 0 && (
+                  <li className="text-orange-700 bg-orange-50 px-2 py-1 rounded">
+                    🚫 <b>{resumo.dedup_canceladas.toLocaleString("pt-BR")}</b> NF-e canceladas/denegadas (cStat ≠ 100/150) — EXCLUÍDAS do faturamento e da apuração de impostos. Isso é o comportamento correto conforme SEFAZ.
+                  </li>
+                )}
                 {(resumo.dedup_no_lote > 0 || resumo.dedup_no_banco > 0) && (
                   <li className="text-amber-700 bg-amber-50 px-2 py-1 rounded">
                     ⚠️ <b>Deduplicação:</b> de {resumo.dedup_recebidas.toLocaleString("pt-BR")} XMLs recebidos,
                     {" "}<b>{resumo.dedup_no_lote.toLocaleString("pt-BR")}</b> duplicados no próprio lote
                     {resumo.dedup_no_banco > 0 && <> e <b>{resumo.dedup_no_banco.toLocaleString("pt-BR")}</b> já existiam no banco</>}
-                    . Isso é normal — pastas do SEFAZ trazem 2-3 XMLs por NF (autorização + eventos + cancelamento).
+                    . Normal — pastas do SEFAZ trazem 2-3 XMLs por NF (autorização + eventos).
                   </li>
                 )}
                 <li>📝 Lançamentos totais: <b>{resumo.lancamentos.toLocaleString("pt-BR")}</b></li>
