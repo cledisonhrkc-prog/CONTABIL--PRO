@@ -18,6 +18,7 @@ const menu: Array<{ label: string; href: string; icon: string; group?: string }>
   { label: "Auditoria R08", href: "/auditoria", icon: "🔍" },
   { label: "Reforma 2027", href: "/reforma", icon: "🇧🇷" },
   { label: "Comparativo Regimes", href: "/comparativo", icon: "🏛️" },
+  { label: "Conciliação (vs Colab)", href: "/conciliacao", icon: "🔍" },
   { label: "Analisar com IA", href: "/analise-ia", icon: "🤖" },
   { label: "Relatórios", href: "/relatorios", icon: "📑" },
   { label: "SPED / Exportar", href: "/exportar", icon: "💾" },

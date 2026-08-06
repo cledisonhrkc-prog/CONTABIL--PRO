@@ -22,6 +22,7 @@ const ROTAS: Array<{ label: string; href: string; keywords: string }> = [
   { label: "Auditoria R08", href: "/auditoria", keywords: "auditoria monofasico r08 pis cofins" },
   { label: "Reforma 2027", href: "/reforma", keywords: "reforma tributaria cbs ibs is 2027" },
   { label: "Comparativo de Regimes", href: "/comparativo", keywords: "comparativo regimes simples presumido real reforma migracao planejamento" },
+  { label: "Conciliação Fiscal x Colab", href: "/conciliacao", keywords: "conciliacao colab divergencia cfop faturamento comparacao sistemas" },
   { label: "Analisar com IA", href: "/analise-ia", keywords: "ia inteligencia artificial chatgpt claude gemini analise" },
   { label: "Relatórios", href: "/relatorios", keywords: "relatorios" },
   { label: "SPED / Exportar", href: "/exportar", keywords: "sped exportar pdf excel word" },
