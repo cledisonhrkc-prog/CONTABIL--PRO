@@ -45,9 +45,12 @@ export async function POST(req: Request) {
       await db.insert(planoContas).values(PLANO_CONTAS_PADRAO);
     }
 
+    // Nome/CNPJ vêm do body (se informados); default = demo interno (não usar em cliente)
+    const cnpjDemo = String(body.cnpj ?? "03000000000191").replace(/\D/g, "");
+    const nomeDemo = String(body.nome ?? "DEMONSTRAÇÃO INTERNA — NÃO USAR EM PRODUÇÃO");
     const emp = await garantirEmpresa({
-      cnpj: "03000000000191",
-      nome: "CONTÁBIL PRO DEMO LTDA",
+      cnpj: cnpjDemo,
+      nome: nomeDemo,
       regime,
       anexo_simples: anexo,
       segmento,

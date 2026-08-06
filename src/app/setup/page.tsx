@@ -207,29 +207,48 @@ export default function SetupPage() {
                 </button>
               </div>
 
-              <div className="flex gap-2 justify-between">
+              {/* PAINEL VERMELHO: RESET TOTAL PRA COMEÇAR NOVO CLIENTE */}
+              <div className="bg-red-50 border-2 border-red-300 rounded-lg p-4">
+                <div className="flex items-start gap-3">
+                  <span className="text-3xl">🧹</span>
+                  <div className="flex-1">
+                    <p className="text-sm font-bold text-red-900">
+                      Novo cliente / Zerar demo — Apaga tudo do banco
+                    </p>
+                    <p className="text-xs text-red-800 mt-1">
+                      Use este botão SEMPRE antes de atender um novo cliente.
+                      Apaga a empresa demo, todas as NFs, lançamentos, apuração, auditoria
+                      e reseta os IDs. O plano de contas padrão é mantido.
+                    </p>
+                    <button
+                      onClick={async () => {
+                        if (!confirm("⚠️ ATENÇÃO: isso APAGA todas as notas fiscais, lançamentos, empresas cadastradas e histórico. Só serve pra COMEÇAR ZERADO com novo cliente. Confirmar?")) return;
+                        setLoading(true);
+                        setMsg("🧹 Limpando tudo do banco...");
+                        const r = await fetch("/api/diagnostico?reset=1", { method: "POST" });
+                        const j = await r.json();
+                        if (j.ok) {
+                          setMsg("✅ Banco 100% zerado. Vá em /importar e comece com os XMLs do cliente.");
+                        } else {
+                          setMsg("❌ Falhou: " + (j.erro ?? ""));
+                        }
+                        await rodarDiag();
+                      }}
+                      className="mt-3 w-full px-4 py-3 bg-red-600 hover:bg-red-700 text-white rounded-md font-bold text-sm"
+                    >
+                      🗑️ ZERAR TUDO — Começar com novo cliente
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex gap-2 justify-between pt-2">
                 <button onClick={rodarDiag} className="text-sm text-slate-600 hover:text-slate-800">
                   🔄 Re-verificar
                 </button>
-                <div className="flex gap-2">
-                  <button
-                    onClick={async () => {
-                      if (!confirm("⚠️ Isso APAGA TODOS OS DADOS (notas, lançamentos, empresa, tudo). Confirmar?")) return;
-                      setLoading(true);
-                      setMsg("Limpando banco...");
-                      const r = await fetch("/api/diagnostico?reset=1", { method: "POST" });
-                      const j = await r.json();
-                      setMsg(j.ok ? "✅ Banco limpo!" : "❌ " + (j.erro ?? "falhou"));
-                      await rodarDiag();
-                    }}
-                    className="text-sm text-red-600 hover:text-red-800 border border-red-200 px-3 py-2 rounded"
-                  >
-                    🗑️ Limpar banco
-                  </button>
-                  <Link href="/importar" className="text-sm bg-slate-800 text-white px-4 py-2 rounded hover:bg-slate-900">
-                    Importar XMLs →
-                  </Link>
-                </div>
+                <Link href="/importar" className="text-sm bg-slate-800 text-white px-4 py-2 rounded hover:bg-slate-900">
+                  Importar XMLs →
+                </Link>
               </div>
             </div>
           </div>
