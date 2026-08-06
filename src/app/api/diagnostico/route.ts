@@ -121,14 +121,130 @@ export async function GET() {
 
 // POST /api/diagnostico?auto=1     -> cria tabelas + popula plano de contas
 // POST /api/diagnostico?reset=1    -> LIMPA TODOS OS DADOS (mantém tabelas)
+// POST /api/diagnostico?upgrade=1  -> aplica upgrades de schema com segurança
+//                                     (remove dupes órfãs + cria índice UNIQUE)
 export async function POST(req: Request) {
   const url = new URL(req.url);
   const auto = url.searchParams.get("auto") === "1";
   const reset = url.searchParams.get("reset") === "1";
+  const upgrade = url.searchParams.get("upgrade") === "1";
   const t0 = Date.now();
   const passos: string[] = [];
 
   try {
+    if (upgrade) {
+      passos.push("1. Verificando duplicatas em notas_fiscais...");
+      const dupCount = await db.execute<{ c: string }>(sql`
+        SELECT COUNT(*)::text AS c FROM (
+          SELECT empresa_id, chave, COUNT(*)
+          FROM notas_fiscais
+          WHERE chave IS NOT NULL AND chave <> ''
+          GROUP BY empresa_id, chave
+          HAVING COUNT(*) > 1
+        ) t
+      `);
+      const nDup = Number(dupCount.rows[0]?.c ?? 0);
+      passos.push(`   → ${nDup} chaves duplicadas encontradas`);
+
+      if (nDup > 0) {
+        passos.push("2. Removendo duplicatas (mantém a MENOR id de cada chave)...");
+        // Apaga itens_nf, lançamentos e auditoria das notas duplicadas primeiro
+        await db.execute(sql`
+          WITH dupes AS (
+            SELECT id FROM (
+              SELECT id, ROW_NUMBER() OVER (
+                PARTITION BY empresa_id, chave ORDER BY id ASC
+              ) AS rn FROM notas_fiscais
+              WHERE chave IS NOT NULL AND chave <> ''
+            ) t WHERE rn > 1
+          )
+          DELETE FROM lancamento_itens
+          WHERE id_lanc IN (SELECT id FROM lancamentos WHERE id_nf IN (SELECT id FROM dupes))
+        `);
+        await db.execute(sql`
+          DELETE FROM lancamentos WHERE id_nf IN (
+            SELECT id FROM (
+              SELECT id, ROW_NUMBER() OVER (
+                PARTITION BY empresa_id, chave ORDER BY id ASC
+              ) AS rn FROM notas_fiscais
+              WHERE chave IS NOT NULL AND chave <> ''
+            ) t WHERE rn > 1
+          )
+        `);
+        await db.execute(sql`
+          DELETE FROM auditoria WHERE id_nf IN (
+            SELECT id FROM (
+              SELECT id, ROW_NUMBER() OVER (
+                PARTITION BY empresa_id, chave ORDER BY id ASC
+              ) AS rn FROM notas_fiscais
+              WHERE chave IS NOT NULL AND chave <> ''
+            ) t WHERE rn > 1
+          )
+        `);
+        await db.execute(sql`
+          DELETE FROM contas_receber WHERE id_nf IN (
+            SELECT id FROM (
+              SELECT id, ROW_NUMBER() OVER (
+                PARTITION BY empresa_id, chave ORDER BY id ASC
+              ) AS rn FROM notas_fiscais
+              WHERE chave IS NOT NULL AND chave <> ''
+            ) t WHERE rn > 1
+          )
+        `);
+        await db.execute(sql`
+          DELETE FROM contas_pagar WHERE id_nf IN (
+            SELECT id FROM (
+              SELECT id, ROW_NUMBER() OVER (
+                PARTITION BY empresa_id, chave ORDER BY id ASC
+              ) AS rn FROM notas_fiscais
+              WHERE chave IS NOT NULL AND chave <> ''
+            ) t WHERE rn > 1
+          )
+        `);
+        await db.execute(sql`
+          DELETE FROM itens_nf WHERE id_nf IN (
+            SELECT id FROM (
+              SELECT id, ROW_NUMBER() OVER (
+                PARTITION BY empresa_id, chave ORDER BY id ASC
+              ) AS rn FROM notas_fiscais
+              WHERE chave IS NOT NULL AND chave <> ''
+            ) t WHERE rn > 1
+          )
+        `);
+        const del = await db.execute<{ c: string }>(sql`
+          WITH x AS (
+            DELETE FROM notas_fiscais WHERE id IN (
+              SELECT id FROM (
+                SELECT id, ROW_NUMBER() OVER (
+                  PARTITION BY empresa_id, chave ORDER BY id ASC
+                ) AS rn FROM notas_fiscais
+                WHERE chave IS NOT NULL AND chave <> ''
+              ) t WHERE rn > 1
+            )
+            RETURNING id
+          )
+          SELECT COUNT(*)::text AS c FROM x
+        `);
+        passos.push(`   ✓ ${del.rows[0]?.c ?? 0} notas duplicadas apagadas em cascata`);
+      } else {
+        passos.push("   ✓ Nenhuma duplicata para remover");
+      }
+
+      passos.push("3. Criando índice UNIQUE (empresa_id, chave) em notas_fiscais...");
+      await db.execute(sql`
+        CREATE UNIQUE INDEX IF NOT EXISTS unq_nf_empresa_chave
+        ON notas_fiscais(empresa_id, chave)
+      `);
+      passos.push("   ✓ Índice UNIQUE criado");
+
+      passos.push("4. Criando índices auxiliares...");
+      await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_nf_empresa_data ON notas_fiscais(empresa_id, data_emissao)`);
+      await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_lanc_empresa_comp ON lancamentos(empresa_id, competencia)`);
+      await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_lanc_itens_lanc ON lancamento_itens(id_lanc)`);
+      await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_lanc_itens_conta ON lancamento_itens(codigo_conta)`);
+      await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_audit_empresa ON auditoria(empresa_id)`);
+      passos.push("   ✓ Índices auxiliares criados");
+    }
     if (reset) {
       passos.push("1. LIMPANDO todos os dados (mantém tabelas)...");
       await db.execute(sql`

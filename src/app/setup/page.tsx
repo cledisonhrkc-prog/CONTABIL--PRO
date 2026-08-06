@@ -183,28 +183,53 @@ export default function SetupPage() {
               </pre>
             </details>
 
-            <div className="pt-4 border-t border-slate-200 flex gap-2 justify-between">
-              <button onClick={rodarDiag} className="text-sm text-slate-600 hover:text-slate-800">
-                🔄 Re-verificar
-              </button>
-              <div className="flex gap-2">
+            <div className="pt-4 border-t border-slate-200 space-y-3">
+              <div className="bg-blue-50 border border-blue-200 rounded p-3">
+                <p className="text-sm font-medium text-blue-900 mb-1">
+                  🔧 Upgrade seguro de schema (SEM apagar dados legítimos)
+                </p>
+                <p className="text-xs text-blue-700 mb-2">
+                  Remove notas duplicadas por chave e cria o índice UNIQUE que impede duplicatas futuras.
+                  Use isso após atualizar o código, principalmente se você tem dados anteriores no banco.
+                </p>
                 <button
                   onClick={async () => {
-                    if (!confirm("⚠️ Isso APAGA TODOS OS DADOS (notas, lançamentos, empresa, tudo). Confirmar?")) return;
                     setLoading(true);
-                    setMsg("Limpando banco...");
-                    const r = await fetch("/api/diagnostico?reset=1", { method: "POST" });
+                    setMsg("Aplicando upgrade seguro (dedup + índice UNIQUE)...");
+                    const r = await fetch("/api/diagnostico?upgrade=1", { method: "POST" });
                     const j = await r.json();
-                    setMsg(j.ok ? "✅ Banco limpo!" : "❌ " + (j.erro ?? "falhou"));
+                    setMsg((j.ok ? "✅ " : "❌ ") + (j.passos ?? []).join(" | "));
                     await rodarDiag();
                   }}
-                  className="text-sm text-red-600 hover:text-red-800 border border-red-200 px-3 py-2 rounded"
+                  className="w-full text-sm bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded font-medium"
                 >
-                  🗑️ Limpar banco
+                  ⬆️ Aplicar Upgrade Seguro (dedup + índice UNIQUE)
                 </button>
-                <Link href="/importar" className="text-sm bg-slate-800 text-white px-4 py-2 rounded hover:bg-slate-900">
-                  Importar XMLs →
-                </Link>
+              </div>
+
+              <div className="flex gap-2 justify-between">
+                <button onClick={rodarDiag} className="text-sm text-slate-600 hover:text-slate-800">
+                  🔄 Re-verificar
+                </button>
+                <div className="flex gap-2">
+                  <button
+                    onClick={async () => {
+                      if (!confirm("⚠️ Isso APAGA TODOS OS DADOS (notas, lançamentos, empresa, tudo). Confirmar?")) return;
+                      setLoading(true);
+                      setMsg("Limpando banco...");
+                      const r = await fetch("/api/diagnostico?reset=1", { method: "POST" });
+                      const j = await r.json();
+                      setMsg(j.ok ? "✅ Banco limpo!" : "❌ " + (j.erro ?? "falhou"));
+                      await rodarDiag();
+                    }}
+                    className="text-sm text-red-600 hover:text-red-800 border border-red-200 px-3 py-2 rounded"
+                  >
+                    🗑️ Limpar banco
+                  </button>
+                  <Link href="/importar" className="text-sm bg-slate-800 text-white px-4 py-2 rounded hover:bg-slate-900">
+                    Importar XMLs →
+                  </Link>
+                </div>
               </div>
             </div>
           </div>
