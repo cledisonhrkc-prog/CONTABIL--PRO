@@ -101,7 +101,7 @@ export async function GET() {
         "Plano de contas vazio. Chame POST /api/diagnostico?auto=1 para popular automaticamente.";
     } else if (contagens.empresas === 0) {
       diag.proxima_acao =
-        "Banco pronto, mas sem empresa. Vá em /importar e clique em 'Gerar 1000 NF-e Fictícias' para popular o sistema.";
+        "Banco pronto e vazio. Vá em /importar e envie os XMLs de NF-e reais do cliente.";
     } else {
       diag.proxima_acao = "Tudo OK. Sistema pronto para uso.";
     }
