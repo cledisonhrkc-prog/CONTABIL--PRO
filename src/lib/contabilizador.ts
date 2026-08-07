@@ -182,7 +182,7 @@ export async function contabilizarLote(input: ContabilizarInput): Promise<Contab
   const rbt12Real = input.rbt12 ?? null;
   const rbt12Estimado = !rbt12Real || rbt12Real <= 0;
   const rbt12Usado = rbt12Estimado ? 456923 : Number(rbt12Real);
-  const aliqEfetiva = regime === "SIMPLES" ? aliquotaEfetivaSimples(rbt12Usado, input.anexo ?? "I") : 0;
+  const aliqEfetiva = regime === "SIMPLES" ? (rbt12Estimado ? 0.06 : aliquotaEfetivaSimples(rbt12Usado, input.anexo ?? "I")) : 0;
 
   const anos = new Set<number>();
   let auditErros = 0;
@@ -800,5 +800,6 @@ async function encerrarExercicio(empresaId: number, ano: number): Promise<number
     .where(and(eq(exercicios.empresa_id, empresaId), eq(exercicios.ano, ano)));
   return resultado;
 }
+
 
 
