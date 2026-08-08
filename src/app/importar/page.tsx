@@ -5,6 +5,7 @@ import Sidebar from "@/components/Sidebar";
 import Topbar from "@/components/Topbar";
 import { parseNfeXml, type NF } from "@/lib/nfe-parser";
 import { preValidar, formatarPreValidacaoTexto, type PreValidacaoResumo } from "@/lib/pre-validacao";
+import JSZip from "jszip";
 
 type UploadLote = {
   processadas: number;
@@ -247,6 +248,36 @@ export default function ImportarPage() {
     }
   }
 
+  // Empacota TODOS os XMLs num único .zip e força download.
+  // Usuário anexa esse zip na conversa da Claude (arrasta pro chat).
+  const [zipando, setZipando] = useState(false);
+  async function baixarZipCompleto() {
+    if (files.length === 0) return alert("Selecione os XMLs primeiro.");
+    setZipando(true);
+    try {
+      const zip = new JSZip();
+      for (const f of files) {
+        zip.file(f.name, f);
+      }
+      const blob = await zip.generateAsync({
+        type: "blob",
+        compression: "DEFLATE",
+        compressionOptions: { level: 6 },
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `xmls_para_claude_${new Date().toISOString().substring(0, 10)}_${files.length}notas.zip`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      alert("Falha ao gerar zip: " + (e as Error).message);
+    }
+    setZipando(false);
+  }
+
   const totalMB = (files.reduce((a, f) => a + f.size, 0) / 1024 / 1024).toFixed(2);
 
   return (
@@ -327,6 +358,17 @@ export default function ImportarPage() {
                   na IA (ChatGPT/Claude/Gemini) analisar ANTES da contabilização. Nenhum dado é
                   gravado ainda.
                 </p>
+
+                {/* Atalho: baixar zip com TODOS os XMLs pra anexar no Claude */}
+                {files.length > 0 && (
+                  <button
+                    onClick={baixarZipCompleto}
+                    disabled={zipando}
+                    className="w-full mt-2 py-2 bg-orange-100 hover:bg-orange-200 disabled:bg-slate-100 text-orange-800 rounded-md font-medium text-xs border border-orange-300"
+                  >
+                    {zipando ? "🗜️ Gerando..." : `📦 Baixar .zip com TODOS os ${files.length} XMLs (pra arrastar no Claude Pro)`}
+                  </button>
+                )}
               </div>
             </div>
 
@@ -428,6 +470,21 @@ export default function ImportarPage() {
                     ✅ Dossiê copiado! Vá pra aba do Claude que abriu e aperte Ctrl+V
                   </p>
                 )}
+
+                {/* Baixar TODOS os XMLs em zip pra anexar no Claude Pro */}
+                <div className="mt-3 pt-3 border-t border-orange-400">
+                  <p className="text-xs text-orange-100 mb-2">
+                    <b>Quer enviar TODOS os {files.length} XMLs completos pra Claude analisar?</b><br />
+                    Baixe o .zip abaixo e ARRASTE o arquivo pra dentro da conversa do Claude Pro (ele lê arquivos anexados).
+                  </p>
+                  <button
+                    onClick={baixarZipCompleto}
+                    disabled={zipando}
+                    className="w-full py-2.5 bg-orange-900 hover:bg-orange-950 disabled:bg-slate-500 text-white rounded-md font-medium text-sm transition"
+                  >
+                    {zipando ? "🗜️ Gerando .zip..." : `📦 BAIXAR .ZIP COM TODOS OS ${files.length} XMLs (para anexar no Claude)`}
+                  </button>
+                </div>
               </div>
 
               {/* Outras IAs (mesmo dossiê, outros modelos) */}
