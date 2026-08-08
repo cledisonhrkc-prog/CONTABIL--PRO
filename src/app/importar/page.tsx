@@ -56,15 +56,26 @@ export default function ImportarPage() {
   }
 
   // Parse local — MUITO rápido, tudo em memória do navegador
-  async function parseArquivosLocal(): Promise<{ nfs: NF[]; erros: Array<{ arquivo: string; erro: string }> }> {
+  async function parseArquivosLocal(): Promise<{ nfs: NF[]; erros: Array<{ arquivo: string; erro: string }>; xmlsCrus: Array<{ nome: string; xml: string; chave: string }> }> {
     const nfs: NF[] = [];
     const erros: Array<{ arquivo: string; erro: string }> = [];
+    const xmlsCrus: Array<{ nome: string; xml: string; chave: string }> = [];
     const cnpjLimpo = cnpj.replace(/\D/g, "");
     for (let i = 0; i < files.length; i++) {
       const f = files[i];
       try {
         const xml = await f.text();
-        nfs.push(parseNfeXml(xml, cnpjLimpo));
+        const nf = parseNfeXml(xml, cnpjLimpo);
+        nfs.push(nf);
+        // Guarda XML cru (limitado às 5 primeiras + 5 maiores = ~10 amostras)
+        // Máximo 10 KB por XML pra não estourar contexto da IA
+        if (xmlsCrus.length < 20) {
+          xmlsCrus.push({
+            nome: f.name,
+            xml: xml.substring(0, 10000),
+            chave: nf.chave,
+          });
+        }
       } catch (e) {
         erros.push({ arquivo: f.name, erro: (e as Error).message.substring(0, 200) });
       }
@@ -75,7 +86,7 @@ export default function ImportarPage() {
         await new Promise((r) => setTimeout(r, 0));
       }
     }
-    return { nfs, erros };
+    return { nfs, erros, xmlsCrus };
   }
 
   async function enviarLoteJson(nfs: NF[]): Promise<{
@@ -137,7 +148,7 @@ export default function ImportarPage() {
     setPreValidacao(null);
     setNfsParaContabilizar(null);
 
-    const { nfs, erros: parseErros } = await parseArquivosLocal();
+    const { nfs, erros: parseErros, xmlsCrus } = await parseArquivosLocal();
     if (nfs.length === 0) {
       setErroGeral(`Nenhum XML válido. ${parseErros.length} arquivo(s) com erro de parse.`);
       setRunning(false);
@@ -146,7 +157,7 @@ export default function ImportarPage() {
     }
 
     setProgresso({ fase: "🔍 Executando pré-validação estruturada...", atual: 1, total: 1 });
-    const pv = preValidar(nfs);
+    const pv = preValidar(nfs, xmlsCrus);
     const texto = formatarPreValidacaoTexto(pv);
     setPreValidacao(pv);
     setTextoIA(texto);
@@ -333,9 +344,9 @@ export default function ImportarPage() {
                 <div className="flex items-center gap-3">
                   <span className="text-3xl">🔍</span>
                   <div className="flex-1">
-                    <h2 className="text-lg font-bold">PASSO 1 concluído — Dossiê JÁ COPIADO para a Claude</h2>
+                    <h2 className="text-lg font-bold">PASSO 1 concluído — Dossiê + XMLs JÁ COPIADOS para a Claude</h2>
                     <p className="text-sm text-purple-100">
-                      Os {preValidacao.total_xmls_recebidos} XMLs foram parseados. <b>O dossiê já está na sua área de transferência.</b> Clique no botão laranja abaixo para abrir a Claude AI e cole com Ctrl+V. Nenhum dado foi gravado no banco ainda.
+                      Os {preValidacao.total_xmls_recebidos} XMLs foram parseados. <b>O dossiê completo (com {preValidacao.amostra_xmls_crus.length} XMLs brutos de amostra) já está na sua área de transferência.</b> Clique no botão laranja abaixo para abrir a Claude AI e cole com Ctrl+V. Nenhum dado foi gravado no banco ainda.
                     </p>
                   </div>
                 </div>

@@ -75,8 +75,11 @@ export type PreValidacaoResumo = {
   // Alertas de problemas detectados
   alertas: PreValidacaoAlerta[];
 
-  // Amostra de 5 NFs completas (pra IA ver o formato cru)
+  // Amostra de 5 NFs completas (pra IA ver o formato cru parseado)
   amostra_nfs: NF[];
+
+  // Amostra de XMLs BRUTOS (raw) — pra IA ver os campos originais como vieram do SEFAZ
+  amostra_xmls_crus: Array<{ nome: string; xml: string; chave: string }>;
 };
 
 // NCMs de produtos monofásicos (mesmo conjunto do contabilizador)
@@ -127,7 +130,10 @@ const CSTAT_DESC: Record<string, string> = {
   "302": "Uso denegado: Irregularidade fiscal do destinatário",
 };
 
-export function preValidar(nfs: NF[]): PreValidacaoResumo {
+export function preValidar(
+  nfs: NF[],
+  xmlsCrus: Array<{ nome: string; xml: string; chave: string }> = []
+): PreValidacaoResumo {
   const alertas: PreValidacaoAlerta[] = [];
   const por_status: Record<string, number> = {};
   const por_tipo_operacao: Record<string, number> = {};
@@ -380,6 +386,7 @@ export function preValidar(nfs: NF[]): PreValidacaoResumo {
     ncm_analise,
     alertas,
     amostra_nfs,
+    amostra_xmls_crus: xmlsCrus.slice(0, 10),
   };
 }
 
@@ -483,11 +490,22 @@ export function formatarPreValidacaoTexto(pv: PreValidacaoResumo): string {
     }
   }
   l.push("");
-  l.push("## 12. AMOSTRA DE 5 NF-e COMPLETAS (crus, direto do parse)");
+  l.push("## 12. AMOSTRA DE 5 NF-e COMPLETAS (parsed JSON)");
   l.push("```json");
   l.push(JSON.stringify(pv.amostra_nfs, null, 2));
   l.push("```");
   l.push("");
+  l.push("## 13. AMOSTRA DE XMLs BRUTOS (raw SEFAZ — para verificação de campos originais)");
+  l.push(`Total de amostras: ${pv.amostra_xmls_crus.length} XMLs (limitados a 10 KB cada, primeiros ${pv.amostra_xmls_crus.length} do lote)`);
+  l.push("");
+  for (let i = 0; i < pv.amostra_xmls_crus.length; i++) {
+    const s = pv.amostra_xmls_crus[i];
+    l.push(`### XML ${i + 1}: ${s.nome} (chave: ${s.chave || "-"})`);
+    l.push("```xml");
+    l.push(s.xml);
+    l.push("```");
+    l.push("");
+  }
   l.push("---");
   l.push("## PERGUNTAS PARA A IA");
   l.push("");
