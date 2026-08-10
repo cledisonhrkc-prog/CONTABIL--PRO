@@ -5,6 +5,7 @@ import Sidebar from "@/components/Sidebar";
 import Topbar from "@/components/Topbar";
 import { parseNfeXml, type NF } from "@/lib/nfe-parser";
 import { preValidar, formatarPreValidacaoTexto, type PreValidacaoResumo } from "@/lib/pre-validacao";
+import JSZip from "jszip";
 
 type UploadLote = {
   processadas: number;
@@ -56,15 +57,26 @@ export default function ImportarPage() {
   }
 
   // Parse local — MUITO rápido, tudo em memória do navegador
-  async function parseArquivosLocal(): Promise<{ nfs: NF[]; erros: Array<{ arquivo: string; erro: string }> }> {
+  async function parseArquivosLocal(): Promise<{ nfs: NF[]; erros: Array<{ arquivo: string; erro: string }>; xmlsCrus: Array<{ nome: string; xml: string; chave: string }> }> {
     const nfs: NF[] = [];
     const erros: Array<{ arquivo: string; erro: string }> = [];
+    const xmlsCrus: Array<{ nome: string; xml: string; chave: string }> = [];
     const cnpjLimpo = cnpj.replace(/\D/g, "");
     for (let i = 0; i < files.length; i++) {
       const f = files[i];
       try {
         const xml = await f.text();
-        nfs.push(parseNfeXml(xml, cnpjLimpo));
+        const nf = parseNfeXml(xml, cnpjLimpo);
+        nfs.push(nf);
+        // Guarda XML cru (limitado às 5 primeiras + 5 maiores = ~10 amostras)
+        // Máximo 10 KB por XML pra não estourar contexto da IA
+        if (xmlsCrus.length < 20) {
+          xmlsCrus.push({
+            nome: f.name,
+            xml: xml.substring(0, 10000),
+            chave: nf.chave,
+          });
+        }
       } catch (e) {
         erros.push({ arquivo: f.name, erro: (e as Error).message.substring(0, 200) });
       }
@@ -75,7 +87,7 @@ export default function ImportarPage() {
         await new Promise((r) => setTimeout(r, 0));
       }
     }
-    return { nfs, erros };
+    return { nfs, erros, xmlsCrus };
   }
 
   async function enviarLoteJson(nfs: NF[]): Promise<{
@@ -137,7 +149,7 @@ export default function ImportarPage() {
     setPreValidacao(null);
     setNfsParaContabilizar(null);
 
-    const { nfs, erros: parseErros } = await parseArquivosLocal();
+    const { nfs, erros: parseErros, xmlsCrus } = await parseArquivosLocal();
     if (nfs.length === 0) {
       setErroGeral(`Nenhum XML válido. ${parseErros.length} arquivo(s) com erro de parse.`);
       setRunning(false);
@@ -146,13 +158,21 @@ export default function ImportarPage() {
     }
 
     setProgresso({ fase: "🔍 Executando pré-validação estruturada...", atual: 1, total: 1 });
-    const pv = preValidar(nfs);
+    const pv = preValidar(nfs, xmlsCrus);
     const texto = formatarPreValidacaoTexto(pv);
     setPreValidacao(pv);
     setTextoIA(texto);
     setNfsParaContabilizar(nfs);
     setRunning(false);
     setProgresso(null);
+    // Auto-copia o dossiê pra área de transferência assim que a validação termina
+    try {
+      await navigator.clipboard.writeText(texto);
+      setCopiado(true);
+      setTimeout(() => setCopiado(false), 3000);
+    } catch {
+      // silencioso — se falhar, usuário pode clicar no botão manualmente
+    }
   }
 
   // PASSO 2: contabilizar APÓS aprovação humana da pré-validação
@@ -226,6 +246,36 @@ export default function ImportarPage() {
     } catch {
       alert("Não conseguiu copiar. Selecione manualmente.");
     }
+  }
+
+  // Empacota TODOS os XMLs num único .zip e força download.
+  // Usuário anexa esse zip na conversa da Claude (arrasta pro chat).
+  const [zipando, setZipando] = useState(false);
+  async function baixarZipCompleto() {
+    if (files.length === 0) return alert("Selecione os XMLs primeiro.");
+    setZipando(true);
+    try {
+      const zip = new JSZip();
+      for (const f of files) {
+        zip.file(f.name, f);
+      }
+      const blob = await zip.generateAsync({
+        type: "blob",
+        compression: "DEFLATE",
+        compressionOptions: { level: 6 },
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `xmls_para_claude_${new Date().toISOString().substring(0, 10)}_${files.length}notas.zip`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      alert("Falha ao gerar zip: " + (e as Error).message);
+    }
+    setZipando(false);
   }
 
   const totalMB = (files.reduce((a, f) => a + f.size, 0) / 1024 / 1024).toFixed(2);
@@ -308,6 +358,17 @@ export default function ImportarPage() {
                   na IA (ChatGPT/Claude/Gemini) analisar ANTES da contabilização. Nenhum dado é
                   gravado ainda.
                 </p>
+
+                {/* Atalho: baixar zip com TODOS os XMLs pra anexar no Claude */}
+                {files.length > 0 && (
+                  <button
+                    onClick={baixarZipCompleto}
+                    disabled={zipando}
+                    className="w-full mt-2 py-2 bg-orange-100 hover:bg-orange-200 disabled:bg-slate-100 text-orange-800 rounded-md font-medium text-xs border border-orange-300"
+                  >
+                    {zipando ? "🗜️ Gerando..." : `📦 Baixar .zip com TODOS os ${files.length} XMLs (pra arrastar no Claude Pro)`}
+                  </button>
+                )}
               </div>
             </div>
 
@@ -325,10 +386,9 @@ export default function ImportarPage() {
                 <div className="flex items-center gap-3">
                   <span className="text-3xl">🔍</span>
                   <div className="flex-1">
-                    <h2 className="text-lg font-bold">PASSO 1 concluído — Dossiê pronto pra IA</h2>
+                    <h2 className="text-lg font-bold">PASSO 1 concluído — Dossiê + XMLs JÁ COPIADOS para a Claude</h2>
                     <p className="text-sm text-purple-100">
-                      Os {preValidacao.total_xmls_recebidos} XMLs foram parseados e analisados. Nenhum dado foi gravado no banco ainda.
-                      Copie o dossiê, mande na IA de sua preferência, e SÓ DEPOIS clique em &quot;Contabilizar&quot;.
+                      Os {preValidacao.total_xmls_recebidos} XMLs foram parseados. <b>O dossiê completo (com {preValidacao.amostra_xmls_crus.length} XMLs brutos de amostra) já está na sua área de transferência.</b> Clique no botão laranja abaixo para abrir a Claude AI e cole com Ctrl+V. Nenhum dado foi gravado no banco ainda.
                     </p>
                   </div>
                 </div>
@@ -385,20 +445,66 @@ export default function ImportarPage() {
                 </div>
               )}
 
-              {/* Botões IA */}
+              {/* BOTÃO PRINCIPAL: Enviar direto pra Claude (destaque máximo) */}
+              <div className="bg-gradient-to-br from-orange-500 to-orange-700 rounded-lg p-5 shadow-lg">
+                <div className="flex items-start gap-3 mb-3">
+                  <span className="text-4xl">🧠</span>
+                  <div className="flex-1 text-white">
+                    <h3 className="text-lg font-bold">Enviar direto pra Claude AI</h3>
+                    <p className="text-sm text-orange-100">
+                      Um clique só: copia o dossiê completo pra área de transferência E abre o Claude em nova aba. Depois é só apertar <b>Ctrl+V</b> na conversa.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={async () => {
+                    await copiarTextoIA();
+                    window.open("https://claude.ai/new", "_blank", "noopener");
+                  }}
+                  className="w-full py-3 bg-white text-orange-700 hover:bg-orange-50 rounded-md font-bold text-base transition"
+                >
+                  🚀 COPIAR DOSSIÊ E ABRIR CLAUDE AGORA
+                </button>
+                {copiado && (
+                  <p className="mt-2 text-center text-white font-medium text-sm">
+                    ✅ Dossiê copiado! Vá pra aba do Claude que abriu e aperte Ctrl+V
+                  </p>
+                )}
+
+                {/* Baixar TODOS os XMLs em zip pra anexar no Claude Pro */}
+                <div className="mt-3 pt-3 border-t border-orange-400">
+                  <p className="text-xs text-orange-100 mb-2">
+                    <b>Quer enviar TODOS os {files.length} XMLs completos pra Claude analisar?</b><br />
+                    Baixe o .zip abaixo e ARRASTE o arquivo pra dentro da conversa do Claude Pro (ele lê arquivos anexados).
+                  </p>
+                  <button
+                    onClick={baixarZipCompleto}
+                    disabled={zipando}
+                    className="w-full py-2.5 bg-orange-900 hover:bg-orange-950 disabled:bg-slate-500 text-white rounded-md font-medium text-sm transition"
+                  >
+                    {zipando ? "🗜️ Gerando .zip..." : `📦 BAIXAR .ZIP COM TODOS OS ${files.length} XMLs (para anexar no Claude)`}
+                  </button>
+                </div>
+              </div>
+
+              {/* Outras IAs (mesmo dossiê, outros modelos) */}
               <div className="bg-white border border-slate-200 rounded-lg p-5">
-                <h3 className="font-semibold text-slate-800 mb-3">🤖 Enviar dossiê pra IA validar (antes de gravar no banco)</h3>
+                <h3 className="font-semibold text-slate-800 mb-2">Ou envie para outra IA (mesmo dossiê)</h3>
+                <p className="text-xs text-slate-500 mb-3">
+                  Primeiro clique &quot;Copiar dossiê&quot; abaixo, depois clique na IA da sua preferência. Cole com Ctrl+V.
+                </p>
                 <div className="flex flex-wrap gap-2 mb-3">
                   <button
                     onClick={copiarTextoIA}
                     className={`px-5 py-2.5 rounded-md font-medium text-sm text-white ${copiado ? "bg-emerald-600" : "bg-purple-600 hover:bg-purple-700"}`}
                   >
-                    {copiado ? "✅ Copiado! Cole na IA" : `📋 Copiar dossiê (${(textoIA.length / 1024).toFixed(0)} KB, ~${Math.ceil(textoIA.length / 4).toLocaleString("pt-BR")} tokens)`}
+                    {copiado ? "✅ Copiado!" : `📋 Copiar dossiê (${(textoIA.length / 1024).toFixed(0)} KB · ~${Math.ceil(textoIA.length / 4).toLocaleString("pt-BR")} tokens)`}
                   </button>
                   <a href="https://chatgpt.com/" target="_blank" rel="noopener" className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-md text-sm">🤖 ChatGPT</a>
-                  <a href="https://claude.ai/new" target="_blank" rel="noopener" className="px-4 py-2.5 bg-orange-600 hover:bg-orange-700 text-white rounded-md text-sm">🧠 Claude</a>
                   <a href="https://gemini.google.com/" target="_blank" rel="noopener" className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-sm">✨ Gemini</a>
                   <a href="https://grok.com/" target="_blank" rel="noopener" className="px-4 py-2.5 bg-slate-800 hover:bg-slate-900 text-white rounded-md text-sm">𝕏 Grok</a>
+                  <a href="https://www.perplexity.ai/" target="_blank" rel="noopener" className="px-4 py-2.5 bg-cyan-600 hover:bg-cyan-700 text-white rounded-md text-sm">🔍 Perplexity</a>
+                  <a href="https://copilot.microsoft.com/" target="_blank" rel="noopener" className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-md text-sm">💠 Copilot</a>
                 </div>
                 <details>
                   <summary className="text-xs text-slate-500 cursor-pointer">👁️ Ver o dossiê completo (o que vai para a IA)</summary>
