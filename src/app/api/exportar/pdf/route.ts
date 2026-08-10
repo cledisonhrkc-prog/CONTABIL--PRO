@@ -6,6 +6,8 @@ import {
   apuracao,
   auditoriaR08,
   dashboardResumo,
+  balancete,
+  dre,
 } from "@/lib/relatorios";
 
 export const dynamic = "force-dynamic";
@@ -75,12 +77,29 @@ export async function GET() {
   const emp = await getEmpresaAtiva();
   if (!emp) return NextResponse.json({ ok: false, error: "Sem empresa" }, { status: 404 });
 
-  const [resumo, bal, apRows, audit] = await Promise.all([
+  // Descobre anos para a DRE
+  const anosSet = new Set<number>();
+
+  const [resumo, bal, apRows, audit, bcRows] = await Promise.all([
     dashboardResumo(emp.id),
     balanco(emp.id),
     apuracao(emp.id),
     auditoriaR08(emp.id),
+    balancete(emp.id),
   ]);
+
+  // Anos a partir da apuração (períodos) — fallback ano atual
+  for (const r of apRows) {
+    const y = parseInt(String(r.periodo).slice(0, 4), 10);
+    if (!isNaN(y)) anosSet.add(y);
+  }
+  if (anosSet.size === 0) anosSet.add(new Date().getFullYear());
+  const anos = Array.from(anosSet).sort();
+  const dreExercicios: Array<{ ano: number; linhas: { descricao: string; valor: number; destaque?: boolean }[] }> = [];
+  for (const ano of anos) {
+    const linhas = await dre(emp.id, ano);
+    dreExercicios.push({ ano, linhas });
+  }
 
   const totalApagar = apRows.reduce((a, r) => a + r.a_pagar, 0);
   const totalCredR08 = audit.reduce((a, r) => a + r.valor_credito, 0);
@@ -109,7 +128,7 @@ export async function GET() {
     );
   } else {
     narrativa.push(
-      `⚠️ Balanço patrimonial com diferença de ${fmtMoeda(balanceDiff)}. Revisão contábil necessária.`
+      `Balanço patrimonial com diferença de ${fmtMoeda(balanceDiff)}. Revisão contábil necessária.`
     );
   }
 
@@ -122,6 +141,9 @@ export async function GET() {
     },
     autoFirstPage: false,
   });
+
+  // Total de páginas fixo do documento
+  const TOTAL_PAGINAS = 3;
 
   let pageNum = 0;
   const addPageWithFooter = () => {
@@ -138,7 +160,7 @@ export async function GET() {
     doc.strokeColor(C.border).lineWidth(0.3).moveTo(40, yRodape - 3).lineTo(doc.page.width - 40, yRodape - 3).stroke();
     doc.fillColor(C.gray).font("Helvetica").fontSize(6.5)
       .text(
-        `Fiscal Tech · ${emp.nome} · CNPJ ${emp.cnpj}   |   Página ${pageNum}/2   |   Gerado em ${new Date().toLocaleString("pt-BR")}`,
+        `Fiscal Tech · ${emp.nome} · CNPJ ${emp.cnpj}   |   Página ${pageNum}/${TOTAL_PAGINAS}   |   Gerado em ${new Date().toLocaleString("pt-BR")}`,
         40, yRodape, { width: doc.page.width - 80, align: "center", lineBreak: false, height: 12 }
       );
     doc.y = savedY;
@@ -202,7 +224,7 @@ export async function GET() {
       ["ATIVO", fmtMoeda(bal.ativo)],
       ["PASSIVO", fmtMoeda(bal.passivo)],
       ["PATRIMÔNIO LÍQUIDO", fmtMoeda(bal.pl)],
-      ["Verificação A - P - PL", balanceDiff < 1 ? "✓ Fecha" : fmtMoeda(balanceDiff)],
+      ["Verificação A - P - PL", balanceDiff < 1 ? "Fecha" : fmtMoeda(balanceDiff)],
     ],
     [W / 2 - 5, W / 2 - 5]
   );
@@ -241,7 +263,7 @@ export async function GET() {
 
   // Bloco de status
   const statusCor = audit.length === 0 ? C.green : C.red;
-  const statusTxt = audit.length === 0 ? "✓ CONFORMIDADE INTEGRAL" : `⚠ ${audit.length} DIVERGÊNCIA(S) DETECTADA(S)`;
+  const statusTxt = audit.length === 0 ? "CONFORMIDADE INTEGRAL" : `${audit.length} DIVERGÊNCIA(S) DETECTADA(S)`;
   doc.roundedRect(40, 70, W, 40, 3).fillAndStroke(C.bg, statusCor);
   doc.fillColor(statusCor).font("Helvetica-Bold").fontSize(13).text(statusTxt, 50, 80, { width: W - 20 });
   doc.fillColor(C.slate).font("Helvetica").fontSize(9)
@@ -297,6 +319,59 @@ export async function GET() {
   doc.fillColor(C.gray).font("Helvetica").fontSize(7).text(`Documento gerado em ${new Date().toLocaleString("pt-BR")}`, 40, doc.y);
 
   // Rodapé da página 2
+  drawFooter();
+
+  // =========================================================
+  // PÁGINA 3 — Balancete + DRE detalhada (anexo do Excel)
+  // =========================================================
+  addPageWithFooter();
+
+  doc.fillColor(C.navy).font("Helvetica-Bold").fontSize(14).text("ANEXO CONTÁBIL — BALANCETE E DRE", 40, 30);
+  doc.fillColor(C.gray).font("Helvetica").fontSize(8)
+    .text("Detalhamento das contas movimentadas e demonstração do resultado", 40, 48);
+  doc.strokeColor(C.gold).lineWidth(0.5).moveTo(40, 60).lineTo(40 + W, 60).stroke();
+
+  doc.y = 70;
+
+  // --- BALANCETE ---
+  doc.fillColor(C.navy).font("Helvetica-Bold").fontSize(11).text("BALANCETE DE VERIFICAÇÃO", 40, doc.y);
+  doc.y += 15;
+  const bcFmt = bcRows.map((r) => [
+    r.codigo,
+    r.descricao,
+    fmtMoeda(r.debito),
+    fmtMoeda(r.credito),
+    fmtMoeda(r.saldo),
+  ]);
+  if (bcFmt.length === 0) bcFmt.push(["-", "Sem movimento", "-", "-", "-"]);
+  tabelaMini(
+    doc,
+    ["Conta", "Descrição", "Débito", "Crédito", "Saldo"],
+    bcFmt,
+    [W * 0.12, W * 0.38, W * 0.166, W * 0.166, W * 0.168]
+  );
+
+  doc.moveDown(0.5);
+
+  // --- DRE ---
+  for (const ex of dreExercicios) {
+    doc.fillColor(C.navy).font("Helvetica-Bold").fontSize(11).text(`DRE — EXERCÍCIO ${ex.ano}`, 40, doc.y + 4);
+    doc.y += 15;
+    const dreFmt = ex.linhas.map((l) => [l.descricao, fmtMoeda(l.valor)]);
+    if (dreFmt.length === 0) dreFmt.push(["Sem dados", "-"]);
+    tabelaMini(doc, ["Descrição", "Valor"], dreFmt, [W * 0.7, W * 0.3]);
+    doc.moveDown(0.4);
+  }
+
+  // Nota do anexo
+  doc.moveDown(0.3);
+  doc.fillColor(C.gray).font("Helvetica-Oblique").fontSize(7)
+    .text(
+      "Anexo gerado a partir da escrituração por partidas dobradas. Para o razão completo, notas fiscais individuais e aging, consulte o Excel exportado (10 abas).",
+      40, doc.y, { width: W, align: "justify" }
+    );
+
+  // Rodapé da página 3
   drawFooter();
 
   doc.end();
