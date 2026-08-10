@@ -46,6 +46,8 @@ export default function ImportarPage() {
   const [textoIA, setTextoIA] = useState<string>("");
   const [nfsParaContabilizar, setNfsParaContabilizar] = useState<NF[] | null>(null);
   const [copiado, setCopiado] = useState(false);
+  const [analiseClaude, setAnaliseClaude] = useState<string | null>(null);
+  const [loadingClaude, setLoadingClaude] = useState(false);
 
   function onFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const list = e.target.files;
@@ -165,6 +167,16 @@ export default function ImportarPage() {
     setNfsParaContabilizar(nfs);
     setRunning(false);
     setProgresso(null);
+    setAnaliseClaude(null);
+    setLoadingClaude(true);
+    try {
+      const rIA = await fetch("/api/analise-ia?analisar=1");
+      const dataIA = await rIA.json();
+      setAnaliseClaude(dataIA.analise_claude ?? "Sem retorno da IA.");
+    } catch (eIA) {
+      setAnaliseClaude("Erro ao chamar a IA: " + String(eIA));
+    }
+    setLoadingClaude(false);
     // Auto-copia o dossiê pra área de transferência assim que a validação termina
     try {
       await navigator.clipboard.writeText(texto);
@@ -536,6 +548,17 @@ export default function ImportarPage() {
                   </button>
                 </div>
               </div>
+            </div>
+          )}
+
+          {(loadingClaude || analiseClaude) && (
+            <div className="mt-6 bg-white border-2 border-purple-300 rounded-lg p-5">
+              <h3 className="font-bold text-purple-900 mb-2">Parecer da IA (Claude)</h3>
+              {loadingClaude ? (
+                <p className="text-sm text-slate-600">Analisando com a IA, aguarde...</p>
+              ) : (
+                <pre className="text-xs text-slate-800 whitespace-pre-wrap max-h-96 overflow-auto">{analiseClaude}</pre>
+              )}
             </div>
           )}
 
