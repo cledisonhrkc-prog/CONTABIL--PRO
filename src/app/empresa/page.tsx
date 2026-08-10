@@ -4,6 +4,7 @@ import { db } from "@/db";
 import { bancos } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { fmtMoney } from "@/components/Money";
+import BotaoDeletarCliente from "@/components/BotaoDeletarCliente";
 
 export const dynamic = "force-dynamic";
 
@@ -42,6 +43,7 @@ export default async function EmpresaPage() {
           </tbody>
         </table>
       </div>
+      <BotaoDeletarCliente cnpj={emp.cnpj} nome={emp.nome} />
     </AppLayout>
   );
 }
