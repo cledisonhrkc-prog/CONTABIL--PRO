@@ -84,6 +84,17 @@ export type DossieIA = {
   top_10_fornecedores: Array<{ nome: string; qtd_notas: number; total: number }>;
   fluxo_mensal: Array<{ mes: string; entradas: number; saidas: number; saldo: number }>;
   auditoria_cfop: Array<{ cfop: string; operacao: string; qtd: number; total: number }>;
+  // NOVO: todos os itens das notas consolidados por NCM+CST+CFOP (cobre 100% das notas do lote)
+  itens_agregados: Array<{
+    ncm: string;
+    cst_pis: string;
+    cst_cof: string;
+    cfop: string;
+    qtd_itens: number;
+    qtd_notas: number;
+    valor_total: number;
+    exemplo: string;
+  }>;
 };
 
 export async function gerarDossieIA(): Promise<DossieIA | null> {
@@ -124,6 +135,7 @@ export async function gerarDossieIA(): Promise<DossieIA | null> {
     top10Forn,
     fluxo,
     cfopD,
+    itensAgg,
   ] = await Promise.all([
     dashboardResumo(eid),
     balanco(eid),
@@ -148,6 +160,25 @@ export async function gerarDossieIA(): Promise<DossieIA | null> {
       GROUP BY i.cfop, n.tipo_operacao
       ORDER BY SUM(i.valor_total) DESC
       LIMIT 20
+    `),
+    // NOVO: consolida TODOS os itens de TODAS as notas por NCM+CST+CFOP
+    db.execute<{
+      ncm: string; cst_pis: string; cst_cof: string; cfop: string;
+      qtd_itens: string; qtd_notas: string; total: string; exemplo: string;
+    }>(sql`
+      SELECT
+        COALESCE(i.ncm,'') AS ncm,
+        COALESCE(i.cst_pis,'') AS cst_pis,
+        COALESCE(i.cst_cof,'') AS cst_cof,
+        COALESCE(i.cfop,'') AS cfop,
+        COUNT(*)::text AS qtd_itens,
+        COUNT(DISTINCT i.id_nf)::text AS qtd_notas,
+        COALESCE(SUM(i.valor_total),0)::text AS total,
+        MAX(i.xprod) AS exemplo
+      FROM itens_nf i JOIN notas_fiscais n ON i.id_nf = n.id
+      WHERE n.empresa_id = ${eid}
+      GROUP BY i.ncm, i.cst_pis, i.cst_cof, i.cfop
+      ORDER BY SUM(i.valor_total) DESC
     `),
   ]);
 
@@ -240,6 +271,16 @@ export async function gerarDossieIA(): Promise<DossieIA | null> {
       qtd: Number(r.qtd),
       total: Number(r.total),
     })),
+    itens_agregados: itensAgg.rows.map((r) => ({
+      ncm: r.ncm,
+      cst_pis: r.cst_pis,
+      cst_cof: r.cst_cof,
+      cfop: r.cfop,
+      qtd_itens: Number(r.qtd_itens),
+      qtd_notas: Number(r.qtd_notas),
+      valor_total: Number(r.total),
+      exemplo: r.exemplo ?? "",
+    })),
   };
 }
 
@@ -248,7 +289,7 @@ export function formatarDossieTexto(d: DossieIA): string {
   const l: string[] = [];
   l.push("# DOSSIÊ CONTÁBIL-FISCAL PARA ANÁLISE POR IA");
   l.push(`Gerado em: ${new Date(d.gerado_em).toLocaleString("pt-BR")}`);
-  l.push(`Sistema: SIGC Contábil Pro v5.0`);
+  l.push(`Sistema: Fiscal Tech | Cledison Azevedo`);
   l.push("");
   l.push("## 1. IDENTIFICAÇÃO DA EMPRESA");
   l.push(`- Razão Social: ${d.empresa.nome}`);
@@ -276,7 +317,7 @@ export function formatarDossieTexto(d: DossieIA): string {
   l.push(`- ATIVO: R$ ${fmt(d.balanco.ativo)}`);
   l.push(`- PASSIVO: R$ ${fmt(d.balanco.passivo)}`);
   l.push(`- PATRIMÔNIO LÍQUIDO: R$ ${fmt(d.balanco.patrimonio_liquido)}`);
-  l.push(`- Fecha (A = P + PL)? ${d.balanco.fecha ? "SIM ✓" : "NÃO ✗"}`);
+  l.push(`- Fecha (A = P + PL)? ${d.balanco.fecha ? "SIM" : "NÃO"}`);
   l.push("");
   l.push("## 5. DRE POR EXERCÍCIO");
   for (const ano of d.dre_por_ano) {
@@ -308,7 +349,7 @@ export function formatarDossieTexto(d: DossieIA): string {
   }
   l.push("");
   l.push("## 8. REFORMA TRIBUTÁRIA (EC 132/2023 + LC 214/2025)");
-  l.push(`- Pré-Reforma (≤2025) — PIS+COFINS+IPI: R$ ${fmt(d.reforma_tributaria_2027.pre_reforma_pis_cofins_ipi)}`);
+  l.push(`- Pré-Reforma (<=2025) — PIS+COFINS+IPI: R$ ${fmt(d.reforma_tributaria_2027.pre_reforma_pis_cofins_ipi)}`);
   l.push(`- Transição 2026 — CBS 0,9% + IBS 0,1% teste: R$ ${fmt(d.reforma_tributaria_2027.transicao_2026_cbs_ibs)}`);
   l.push(`- Reforma 2027+ TOTAL: R$ ${fmt(d.reforma_tributaria_2027.reforma_2027_total.total)}`);
   l.push(`  - CBS (8,8%): R$ ${fmt(d.reforma_tributaria_2027.reforma_2027_total.cbs)}`);
@@ -339,6 +380,16 @@ export function formatarDossieTexto(d: DossieIA): string {
     l.push(`| ${c.cfop} | ${c.operacao} | ${c.qtd} | ${fmt(c.total)} |`);
   }
   l.push("");
+  l.push("## 13. ITENS AGREGADOS — TODOS OS NCM/CST/CFOP DO LOTE (100% das notas)");
+  l.push("Consolidação de todos os itens de todas as notas por NCM + CST PIS + CST COFINS + CFOP.");
+  l.push("Esta é a base bruta para detectar padrões e anomalias que os agregados acima escondem.");
+  l.push("");
+  l.push("| NCM | CST PIS | CST COF | CFOP | Qtd itens | Qtd notas | Valor total | Produto exemplo |");
+  l.push("|-----|---------|---------|------|-----------|-----------|-------------|-----------------|");
+  for (const it of d.itens_agregados) {
+    l.push(`| ${it.ncm} | ${it.cst_pis} | ${it.cst_cof} | ${it.cfop} | ${it.qtd_itens} | ${it.qtd_notas} | ${fmt(it.valor_total)} | ${(it.exemplo || "").slice(0, 40)} |`);
+  }
+  l.push("");
   l.push("---");
   l.push("## PERGUNTAS SUGERIDAS PARA A IA");
   l.push("");
@@ -346,13 +397,13 @@ export function formatarDossieTexto(d: DossieIA): string {
   l.push("");
   l.push("2. **Auditoria monofásica**: As divergências detectadas na regra R08 são todas legítimas? Vale a pena entrar com PER/DCOMP?");
   l.push("");
-  l.push("3. **Reforma Tributária 2027**: Considerando o perfil dessa empresa, qual será o impacto real da CBS/IBS/IS quando entrar em vigor? Ela ganha ou perde com a Reforma?");
+  l.push("3. **Itens agregados (seção 13)**: Analisando NCM por NCM com seus CSTs, algum produto está com CST incompatível? Algum NCM monofásico marcado como tributado normal (ou vice-versa)?");
   l.push("");
-  l.push("4. **Recomendações estratégicas**: Baseado no DRE, apuração e perfil de compras/vendas, quais os 3 principais riscos e as 3 principais oportunidades desta empresa?");
+  l.push("4. **Reforma Tributária 2027**: Considerando o perfil dessa empresa, qual será o impacto real da CBS/IBS/IS quando entrar em vigor?");
   l.push("");
-  l.push("5. **CFOP e classificação**: Os CFOPs utilizados são coerentes com a atividade da empresa? Alguma classificação parece equivocada?");
+  l.push("5. **Recomendações estratégicas**: Baseado no DRE, apuração e perfil de compras/vendas, quais os 3 principais riscos e as 3 principais oportunidades desta empresa?");
   l.push("");
-  l.push("6. **Planejamento tributário**: Vale a pena migrar de regime? Se sim, para qual e por quê?");
+  l.push("6. **CFOP e classificação**: Os CFOPs utilizados são coerentes com a atividade da empresa? Alguma classificação parece equivocada?");
   l.push("");
   l.push("_Fim do dossiê._");
 
