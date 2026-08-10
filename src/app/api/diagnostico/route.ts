@@ -46,7 +46,7 @@ export async function GET() {
     tempo_ms: number;
   } = {
     ok: false,
-    passo: "início",
+    passo: "inicio",
     detalhes: {},
     tempo_ms: 0,
   };
@@ -58,14 +58,14 @@ export async function GET() {
     diag.detalhes.database_url_configurada = !!url;
     if (!url) {
       diag.proxima_acao =
-        "Configure DATABASE_URL no painel do Vercel: Project Settings → Environment Variables";
+        "Configure DATABASE_URL no painel do Vercel: Project Settings -> Environment Variables";
       diag.tempo_ms = Date.now() - inicio;
       return NextResponse.json(diag, { status: 500 });
     }
     diag.detalhes.database_url_host = url.replace(/postgresql:\/\/[^@]+@/, "postgresql://***@").substring(0, 90) + "...";
 
-    // 2) Conexão funciona?
-    diag.passo = "2. Testar conexão com Postgres";
+    // 2) Conexao funciona?
+    diag.passo = "2. Testar conexao com Postgres";
     await db.execute(sql`SELECT 1 as t`);
     diag.detalhes.conexao_ok = true;
 
@@ -101,37 +101,80 @@ export async function GET() {
         "Plano de contas vazio. Chame POST /api/diagnostico?auto=1 para popular automaticamente.";
     } else if (contagens.empresas === 0) {
       diag.proxima_acao =
-        "Banco pronto e vazio. Vá em /importar e envie os XMLs de NF-e reais do cliente.";
+        "Banco pronto e vazio. Va em /importar e envie os XMLs de NF-e reais do cliente.";
     } else {
       diag.proxima_acao = "Tudo OK. Sistema pronto para uso.";
     }
 
     diag.ok = true;
-    diag.passo = "concluído";
+    diag.passo = "concluido";
     diag.tempo_ms = Date.now() - inicio;
     return NextResponse.json(diag);
   } catch (e) {
     diag.detalhes.erro = (e as Error).message;
     diag.tempo_ms = Date.now() - inicio;
     diag.proxima_acao =
-      "Erro ao consultar o banco. Verifique: (a) URL do Supabase usa a porta 6543 (Transaction Pooler); (b) a senha está correta; (c) o projeto Supabase não está pausado.";
+      "Erro ao consultar o banco. Verifique: (a) URL do Supabase usa a porta 6543 (Transaction Pooler); (b) a senha esta correta; (c) o projeto Supabase nao esta pausado.";
     return NextResponse.json(diag, { status: 500 });
   }
 }
 
-// POST /api/diagnostico?auto=1     -> cria tabelas + popula plano de contas
-// POST /api/diagnostico?reset=1    -> LIMPA TODOS OS DADOS (mantém tabelas)
-// POST /api/diagnostico?upgrade=1  -> aplica upgrades de schema com segurança
-//                                     (remove dupes órfãs + cria índice UNIQUE)
+// POST /api/diagnostico?auto=1              -> cria tabelas + popula plano de contas
+// POST /api/diagnostico?reset=1             -> LIMPA TODOS OS DADOS (mantem tabelas)
+// POST /api/diagnostico?upgrade=1           -> aplica upgrades de schema com seguranca
+// POST /api/diagnostico?delete_empresa=CNPJ -> apaga SO um cliente (mantem os demais)
 export async function POST(req: Request) {
   const url = new URL(req.url);
   const auto = url.searchParams.get("auto") === "1";
   const reset = url.searchParams.get("reset") === "1";
   const upgrade = url.searchParams.get("upgrade") === "1";
+  const delEmpresa = url.searchParams.get("delete_empresa");
   const t0 = Date.now();
   const passos: string[] = [];
 
   try {
+    if (delEmpresa) {
+      passos.push(`1. Buscando empresa CNPJ ${delEmpresa}...`);
+      const empQ = await db.execute<{ id: string; nome: string }>(sql`
+        SELECT id::text AS id, nome FROM empresas WHERE cnpj = ${delEmpresa} LIMIT 1
+      `);
+      const empRow = empQ.rows[0];
+      if (!empRow) {
+        return NextResponse.json(
+          { ok: false, passos, erro: `Empresa com CNPJ ${delEmpresa} nao encontrada`, tempo_ms: Date.now() - t0 },
+          { status: 404 }
+        );
+      }
+      const empId = Number(empRow.id);
+      passos.push(`   -> encontrada: ${empRow.nome} (id ${empId})`);
+
+      passos.push("2. Apagando dados do cliente em cascata...");
+      await db.execute(sql`
+        DELETE FROM lancamento_itens
+        WHERE id_lanc IN (SELECT id FROM lancamentos WHERE empresa_id = ${empId})
+      `);
+      await db.execute(sql`
+        DELETE FROM itens_nf
+        WHERE id_nf IN (SELECT id FROM notas_fiscais WHERE empresa_id = ${empId})
+      `);
+      await db.execute(sql`DELETE FROM lancamentos WHERE empresa_id = ${empId}`);
+      await db.execute(sql`DELETE FROM auditoria WHERE empresa_id = ${empId}`);
+      await db.execute(sql`DELETE FROM contas_receber WHERE empresa_id = ${empId}`);
+      await db.execute(sql`DELETE FROM contas_pagar WHERE empresa_id = ${empId}`);
+      await db.execute(sql`DELETE FROM apuracao_impostos WHERE empresa_id = ${empId}`);
+      await db.execute(sql`DELETE FROM exercicios WHERE empresa_id = ${empId}`);
+      await db.execute(sql`DELETE FROM bancos WHERE empresa_id = ${empId}`);
+      await db.execute(sql`DELETE FROM notas_fiscais WHERE empresa_id = ${empId}`);
+      await db.execute(sql`DELETE FROM empresas WHERE id = ${empId}`);
+      passos.push(`   -> cliente ${empRow.nome} apagado por completo`);
+
+      return NextResponse.json({
+        ok: true,
+        passos,
+        tempo_ms: Date.now() - t0,
+        proxima_acao: `Cliente ${empRow.nome} removido. Os demais clientes e o plano de contas foram preservados.`,
+      });
+    }
     if (upgrade) {
       passos.push("1. Verificando duplicatas em notas_fiscais...");
       const dupCount = await db.execute<{ c: string }>(sql`
@@ -144,11 +187,10 @@ export async function POST(req: Request) {
         ) t
       `);
       const nDup = Number(dupCount.rows[0]?.c ?? 0);
-      passos.push(`   → ${nDup} chaves duplicadas encontradas`);
+      passos.push(`   -> ${nDup} chaves duplicadas encontradas`);
 
       if (nDup > 0) {
-        passos.push("2. Removendo duplicatas (mantém a MENOR id de cada chave)...");
-        // Apaga itens_nf, lançamentos e auditoria das notas duplicadas primeiro
+        passos.push("2. Removendo duplicatas (mantem a MENOR id de cada chave)...");
         await db.execute(sql`
           WITH dupes AS (
             SELECT id FROM (
@@ -225,53 +267,53 @@ export async function POST(req: Request) {
           )
           SELECT COUNT(*)::text AS c FROM x
         `);
-        passos.push(`   ✓ ${del.rows[0]?.c ?? 0} notas duplicadas apagadas em cascata`);
+        passos.push(`   -> ${del.rows[0]?.c ?? 0} notas duplicadas apagadas em cascata`);
       } else {
-        passos.push("   ✓ Nenhuma duplicata para remover");
+        passos.push("   -> Nenhuma duplicata para remover");
       }
 
-      passos.push("3. Criando índice UNIQUE (empresa_id, chave) em notas_fiscais...");
+      passos.push("3. Criando indice UNIQUE (empresa_id, chave) em notas_fiscais...");
       await db.execute(sql`
         CREATE UNIQUE INDEX IF NOT EXISTS unq_nf_empresa_chave
         ON notas_fiscais(empresa_id, chave)
       `);
-      passos.push("   ✓ Índice UNIQUE criado");
+      passos.push("   -> indice UNIQUE criado");
 
-      passos.push("4. Criando índices auxiliares...");
+      passos.push("4. Criando indices auxiliares...");
       await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_nf_empresa_data ON notas_fiscais(empresa_id, data_emissao)`);
       await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_lanc_empresa_comp ON lancamentos(empresa_id, competencia)`);
       await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_lanc_itens_lanc ON lancamento_itens(id_lanc)`);
       await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_lanc_itens_conta ON lancamento_itens(codigo_conta)`);
       await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_audit_empresa ON auditoria(empresa_id)`);
-      passos.push("   ✓ Índices auxiliares criados");
+      passos.push("   -> indices auxiliares criados");
     }
     if (reset) {
-      passos.push("1. LIMPANDO todos os dados (mantém tabelas)...");
+      passos.push("1. LIMPANDO todos os dados (mantem tabelas)...");
       await db.execute(sql`
         TRUNCATE lancamento_itens, lancamentos, auditoria, contas_receber,
                  contas_pagar, apuracao_impostos, exercicios, itens_nf,
                  notas_fiscais, bancos, empresas
         RESTART IDENTITY CASCADE
       `);
-      passos.push("   ✓ Dados apagados");
+      passos.push("   -> Dados apagados");
 
-      passos.push("2. Repopulando plano de contas padrão...");
+      passos.push("2. Repopulando plano de contas padrao...");
       await db.execute(sql`DELETE FROM plano_contas`);
       await db.insert(planoContas).values(PLANO_CONTAS_PADRAO);
-      passos.push("   ✓ Plano de contas repopulado");
+      passos.push("   -> Plano de contas repopulado");
     }
     if (auto) {
       passos.push("1. Verificando/criando tabelas via CREATE IF NOT EXISTS...");
       await db.execute(sql.raw(SQL_CREATE_TABLES));
-      passos.push("   ✓ Tabelas criadas/verificadas");
+      passos.push("   -> Tabelas criadas/verificadas");
 
-      passos.push("2. Populando plano de contas padrão...");
+      passos.push("2. Populando plano de contas padrao...");
       await db
         .insert(planoContas)
         .values(PLANO_CONTAS_PADRAO)
         .onConflictDoNothing({ target: planoContas.codigo });
       const r = await db.execute<{ c: string }>(sql`SELECT count(*)::text AS c FROM plano_contas`);
-      passos.push(`   ✓ Plano de contas: ${r.rows[0]?.c ?? 0} contas`);
+      passos.push(`   -> Plano de contas: ${r.rows[0]?.c ?? 0} contas`);
     }
 
     return NextResponse.json({
@@ -279,8 +321,8 @@ export async function POST(req: Request) {
       passos,
       tempo_ms: Date.now() - t0,
       proxima_acao: reset
-        ? "Banco limpo. Vá em /importar para subir os XMLs do cliente."
-        : "Banco pronto. Vá em /importar para subir os XMLs do cliente.",
+        ? "Banco limpo. Va em /importar para subir os XMLs do cliente."
+        : "Banco pronto. Va em /importar para subir os XMLs do cliente.",
     });
   } catch (e) {
     return NextResponse.json(
@@ -295,13 +337,13 @@ export async function POST(req: Request) {
   }
 }
 
-// Uso das tabelas importadas para o TypeScript não reclamar de imports não usados
+// Uso das tabelas importadas para o TypeScript nao reclamar de imports nao usados
 export const _tabelas_referencia = {
   empresas, notasFiscais, lancamentos, bancos, itensNf, lancamentoItens,
   apuracaoImpostos, auditoria, contasReceber, contasPagar, exercicios,
 };
 
-// SQL bruto para criar todas as tabelas — mesmo conteúdo de drizzle/0000_initial_supabase.sql
+// SQL bruto para criar todas as tabelas -- mesmo conteudo de drizzle/0000_initial_supabase.sql
 const SQL_CREATE_TABLES = `
 CREATE TABLE IF NOT EXISTS "apuracao_impostos" (
   "id" serial PRIMARY KEY NOT NULL,
