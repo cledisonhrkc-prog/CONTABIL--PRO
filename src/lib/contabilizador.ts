@@ -339,8 +339,7 @@ export async function contabilizarLote(input: ContabilizarInput): Promise<Contab
 
       const imp: LancItem[] = [];
       if (regime === "SIMPLES") {
-        const das = round(rec * aliqEfetiva);
-        if (das > 0) imp.push(["4.2.08", das, 0], ["2.1.03.09", 0, das]);
+        // DAS movido para lancamento unico no final
       } else if (segregaTributosSaida) {
         if (!extingueIcmsIss) {
           if (vicms > 0) imp.push(["4.2.01", vicms, 0], ["2.1.03.01", 0, vicms]);
@@ -499,6 +498,20 @@ export async function contabilizarLote(input: ContabilizarInput): Promise<Contab
       .limit(1);
     if (exist.length === 0) {
       await db.insert(exercicios).values({ empresa_id: input.empresa_id, ano });
+    }
+  }
+
+  // DAS unico sobre faturamento total (evita erro de arredondamento por nota)
+  if (regime === "SIMPLES" && aliqEfetiva > 0 && baseSaidaLote > 0) {
+    const dasTotal = Math.round(baseSaidaLote * aliqEfetiva * 100) / 100;
+    if (dasTotal > 0) {
+      const anoDas = new Date().getFullYear();
+      const diDas = anosArr.length > 0 ? (Math.min(...anosArr)) + "-06-01" : anoDas + "-06-01";
+      await inserirLancamentoUnico(input.empresa_id, {
+        data: diDas, competencia: diDas, historico: "DAS Simples Nacional - " + anoDas,
+        id_nf: null, origem: "DAS", tipo_lanc: "NORMAL",
+        itens: [["4.2.08", dasTotal, 0], ["2.1.03.09", 0, dasTotal]],
+      });
     }
   }
 
