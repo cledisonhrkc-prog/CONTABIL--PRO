@@ -184,7 +184,10 @@ export async function contabilizarLote(input: ContabilizarInput): Promise<Contab
   // RBT12 automatico: soma faturamento de saida dos ultimos 12 meses JA no banco + este lote
   const rbt12HistoricoQ = await db.execute<{ s: string }>(sql`SELECT COALESCE(SUM(valor_total),0)::text AS s FROM notas_fiscais WHERE empresa_id=${input.empresa_id} AND tipo_operacao='SAIDA' AND data_emissao >= (CURRENT_DATE - INTERVAL '12 months')`);
   const rbt12Historico = Number(rbt12HistoricoQ.rows[0]?.s ?? 0);
-  const rbt12Usado = rbt12Estimado ? Math.max(round(rbt12Historico + baseSaidaLote), round(baseSaidaLote * 12)) : Number(rbt12Real);
+  const baseSaidaTotal = rbt12Historico + baseSaidaLote;
+  const mesesQ = await db.execute<{ m: string }>(sql`SELECT COUNT(DISTINCT date_trunc('month', data_emissao))::text AS m FROM notas_fiscais WHERE empresa_id=${input.empresa_id} AND tipo_operacao='SAIDA'`);
+  const mesesComFat = Math.max(1, Number(mesesQ.rows[0]?.m ?? 1));
+  const rbt12Usado = rbt12Estimado ? round((baseSaidaTotal / mesesComFat) * 12) : Number(rbt12Real);
   const aliqEfetiva = regime === "SIMPLES" ? aliquotaEfetivaSimples(rbt12Usado, input.anexo ?? "I") : 0;
 
   const anos = new Set<number>();
