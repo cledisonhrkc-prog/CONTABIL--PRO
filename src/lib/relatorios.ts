@@ -257,6 +257,12 @@ export async function auditoriaR08(empresaId: number) {
   }));
 }
 
+
+export async function auditoriaClassificacaoNCM(empresaId:number){
+  const r=await db.execute<{numero:string;ncm:string;cst_pis:string;xprod:string;valor:string;qtd:string}>(sqlSELECT COALESCE(n.numero,'?') AS numero,COALESCE(i.ncm,'') AS ncm,COALESCE(i.cst_pis,'') AS cst_pis,COALESCE(MAX(i.xprod),'') AS xprod,COALESCE(SUM(i.valor_total),0)::text AS valor,COUNT(*)::text AS qtd FROM itens_nf i JOIN notas_fiscais n ON i.id_nf=n.id WHERE n.empresa_id= AND i.ncm LIKE '3004%' AND i.cst_pis IN ('49','99') GROUP BY n.numero,i.ncm,i.cst_pis ORDER BY SUM(i.valor_total) DESC LIMIT 200);
+  return r.rows.map((x)=>({numero_nf:x.numero,ncm:x.ncm,cst_pis:x.cst_pis,descricao:x.xprod,valor:round(num(x.valor)),qtd_itens:Number(x.qtd)}));
+}
+
 export async function dashboardResumo(empresaId: number) {
   const r = await db.execute<{
     qtd: string;

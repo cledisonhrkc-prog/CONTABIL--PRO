@@ -8,6 +8,7 @@ import {
   dashboardResumo,
   balancete,
   dre,
+  auditoriaClassificacaoNCM,
 } from "@/lib/relatorios";
 
 export const dynamic = "force-dynamic";
@@ -85,6 +86,7 @@ export async function GET() {
     auditoriaR08(emp.id),
     balancete(emp.id),
   ]);
+  const classNCM = await auditoriaClassificacaoNCM(emp.id);
 
   for (const r of apRows) {
     const y = parseInt(String(r.periodo).slice(0, 4), 10);
@@ -309,6 +311,16 @@ export async function GET() {
     if (dreFmt.length === 0) dreFmt.push(["Sem dados", "-"]);
     tabelaMini(doc, ["Descrição", "Valor"], dreFmt, [W * 0.7, W * 0.3]);
     doc.moveDown(0.3);
+  }
+
+
+  if (classNCM.length > 0) {
+    doc.moveDown(0.3);
+    doc.fillColor(C.navy).font("Helvetica-Bold").fontSize(9.5).text("REVISAO DE CLASSIFICACAO NCM x CST", 40, doc.y);
+    doc.y += 13;
+    tabelaMini(doc, ["NF","NCM","CST","Produto","Valor"], classNCM.slice(0,8).map((x)=>[x.numero_nf,x.ncm,x.cst_pis,(x.descricao||"").slice(0,30),fmtMoeda(x.valor)]), [W*0.13,W*0.2,W*0.1,W*0.37,W*0.2]);
+    doc.fillColor(C.gray).font("Helvetica-Oblique").fontSize(6.5).text("Itens com NCM de medicamento (3004) e CST PIS 49/99 - verificar. Nao afeta o DAS.", 40, doc.y, {width: W});
+    doc.y += 10;
   }
 
   // Nota metodológica
