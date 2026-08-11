@@ -228,7 +228,9 @@ export async function GET() {
   if (apFmt.length === 0) apFmt.push(["Sem apuração", "-", "-", "-"]);
   tabela(doc, ["Período / Imposto", "Débito", "Crédito", "A Pagar"], apFmt, [W * 0.4, W * 0.2, W * 0.2, W * 0.2], addPage, drawFooter);
   doc.fillColor(C.gold).font("Helvetica-Bold").fontSize(10)
-    .text(`TOTAL A RECOLHER: ${fmtMoeda(totalApagar)}`, 40, doc.y, { width: W, align: "right", lineBreak: false });
+    .text(`DAS ESTIMADO: ${fmtMoeda(totalApagar)}`, 40, doc.y, { width: W, align: "right", lineBreak: false });
+  doc.y += 12;
+  doc.fillColor(C.gray).font("Helvetica-Oblique").fontSize(6.5).text("Valor estimado pelo sistema com base no faturamento do periodo. O DAS oficial e apurado no PGDAS-D pela contabilidade responsavel.", 40, doc.y, { width: W, align: "right" });
   doc.y += 14;
 
   // BALANCETE
