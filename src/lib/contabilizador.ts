@@ -506,7 +506,7 @@ export async function contabilizarLote(input: ContabilizarInput): Promise<Contab
     const dasTotal = Math.round(baseSaidaLote * aliqEfetiva * 100) / 100;
     if (dasTotal > 0) {
       const anoDas = new Date().getFullYear();
-      const diDas = anosArr.length > 0 ? (Math.min(...anosArr)) + "-06-01" : anoDas + "-06-01";
+      const diDas = anoDas + "-06-01";
       await inserirLancamentoUnico(input.empresa_id, {
         data: diDas, competencia: diDas, historico: "DAS Simples Nacional - " + anoDas,
         id_nf: null, origem: "DAS", tipo_lanc: "NORMAL",
