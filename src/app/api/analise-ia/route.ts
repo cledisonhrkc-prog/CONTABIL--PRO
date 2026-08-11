@@ -42,7 +42,7 @@ export async function GET(req: Request) {
           max_tokens: 1024,
           messages: [{
             role: "user",
-            content: `Voce e um auditor fiscal brasileiro senior (CRC). Analise este dossie de NF-e ANTES da contabilizacao e responda em portugues, de forma objetiva e tecnica:\n\n${txt}\n\nResponda:\n1. RISCOS FISCAIS: CSTs errados, CFOPs incompativeis, NCMs suspeitos\n2. INTEGRIDADE: totais fazem sentido?\n3. RECOMENDACAO: PROSSEGUIR ou PARAR? Por que?\n4. AUDITORIA R08: NCMs monofasicos com CST errado e credito recuperavel`
+            content: `Voce e um auditor fiscal brasileiro senior (CRC). Analise este dossie de NF-e de forma tecnica, objetiva e EQUILIBRADA. Se o lote estiver em conformidade, diga claramente que esta conforme - NAO invente problemas. Aponte erro APENAS com base legal concreta e citavel. Contexto: farmacia/drogaria de comercio ESTA CORRETA no Simples Nacional Anexo I; produtos monofasicos (NCM 3004) com CST 04 estao corretos e nao geram credito no Simples - NAO classifique como erro.\n\n${txt}\n\nResponda em portugues:\n1. CONFORMIDADE: o lote esta conforme? Se sim, afirme.\n2. INTEGRIDADE: os totais fazem sentido?\n3. RECOMENDACAO: PROSSEGUIR ou revisar?\n4. Observacoes tecnicas, sem alarmismo.`
           }]
         })
       });
