@@ -231,6 +231,12 @@ export async function GET() {
     .text(`DAS ESTIMADO: ${fmtMoeda(totalApagar)}`, 40, doc.y, { width: W, align: "right", lineBreak: false });
   doc.y += 12;
   doc.fillColor(C.gray).font("Helvetica-Oblique").fontSize(6.5).text("Valor estimado pelo sistema com base no faturamento do periodo. O DAS oficial e apurado no PGDAS-D pela contabilidade responsavel.", 40, doc.y, { width: W, align: "right" });
+  doc.y += 16;
+  doc.roundedRect(40, doc.y, W, 54, 3).fillAndStroke(C.bg, C.gold);
+  const yBox = doc.y;
+  doc.fillColor(C.navy).font("Helvetica-Bold").fontSize(8.5).text("COMO LER O DAS DESTE RELATORIO", 50, yBox + 6, { width: W - 20 });
+  doc.fillColor(C.slate).font("Helvetica").fontSize(7.5).text("O valor do DAS aqui e uma ESTIMATIVA tecnica, calculada pela formula oficial do Simples Nacional (LC 123/2006) sobre o faturamento do periodo. O valor DEFINITIVO a recolher e o que consta no PGDAS-D, gerado mensalmente pela contabilidade junto a Receita Federal, pois depende da receita acumulada dos ultimos 12 meses (RBT12). Pequenas diferencas entre esta estimativa e o PGDAS-D sao normais e esperadas.", 50, yBox + 18, { width: W - 20, align: "justify" });
+  doc.y = yBox + 60;
   doc.y += 14;
 
   // BALANCETE
