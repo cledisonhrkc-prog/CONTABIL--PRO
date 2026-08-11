@@ -503,7 +503,8 @@ export async function contabilizarLote(input: ContabilizarInput): Promise<Contab
 
   // DAS unico sobre faturamento total (evita erro de arredondamento por nota)
   if (regime === "SIMPLES" && aliqEfetiva > 0 && baseSaidaLote > 0) {
-    const dasTotal = Math.round(baseSaidaLote * aliqEfetiva * 100) / 100;
+    const fatTotalSaida = round(nfsProcessar.filter((n) => n.tipo_operacao === "SAIDA").reduce((a, n) => a + n.valor_total, 0));
+    const dasTotal = Math.round(fatTotalSaida * aliqEfetiva * 100) / 100;
     if (dasTotal > 0) {
       const anoDas = new Date().getFullYear();
       const diDas = anoDas + "-06-01";
