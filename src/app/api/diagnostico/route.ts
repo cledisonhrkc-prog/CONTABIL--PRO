@@ -122,7 +122,7 @@ export async function GET() {
 // POST /api/diagnostico?auto=1              -> cria tabelas + popula plano de contas
 // POST /api/diagnostico?reset=1             -> LIMPA TODOS OS DADOS (mantem tabelas)
 // POST /api/diagnostico?upgrade=1           -> aplica upgrades de schema com seguranca
-// POST /api/diagnostico?delete_empresa=CNPJ -> apaga SO um cliente (mantem os demais)
+// POST /api/diagnostico?delete_empresa=CNPJ -> apaga SO um cliente (mantem os demais). Use delete_empresa= (vazio) para apagar empresa com CNPJ vazio/nulo.
 export async function POST(req: Request) {
   const url = new URL(req.url);
   const auto = url.searchParams.get("auto") === "1";
@@ -133,15 +133,18 @@ export async function POST(req: Request) {
   const passos: string[] = [];
 
   try {
-    if (delEmpresa) {
-      passos.push(`1. Buscando empresa CNPJ ${delEmpresa}...`);
+    // FIX: antes usava "if (delEmpresa)" — string vazia "" é falsy em JS e o bloco
+    // era pulado mesmo quando o parametro delete_empresa= foi enviado (so vazio).
+    // Agora checa explicitamente se o parametro foi enviado (nao e null).
+    if (delEmpresa !== null) {
+      passos.push(`1. Buscando empresa CNPJ "${delEmpresa}"...`);
       const empQ = await db.execute<{ id: string; nome: string }>(sql`
         SELECT id::text AS id, nome FROM empresas WHERE cnpj = ${delEmpresa} LIMIT 1
       `);
       const empRow = empQ.rows[0];
       if (!empRow) {
         return NextResponse.json(
-          { ok: false, passos, erro: `Empresa com CNPJ ${delEmpresa} nao encontrada`, tempo_ms: Date.now() - t0 },
+          { ok: false, passos, erro: `Empresa com CNPJ "${delEmpresa}" nao encontrada`, tempo_ms: Date.now() - t0 },
           { status: 404 }
         );
       }
