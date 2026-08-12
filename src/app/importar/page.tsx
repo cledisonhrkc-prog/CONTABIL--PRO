@@ -34,6 +34,7 @@ export default function ImportarPage() {
   const [cnpj, setCnpj] = useState("");
   const [nome, setNome] = useState("");
   const [crtDetectado, setCrtDetectado] = useState<string | null>(null);
+  const [origemRegime, setOrigemRegime] = useState<"" | "cadastro_existente" | "xml_crt" | "padrao">("");
   const [detectando, setDetectando] = useState(false);
   const [detectadoAutomaticamente, setDetectadoAutomaticamente] = useState(false);
   const [running, setRunning] = useState(false);
@@ -48,6 +49,14 @@ export default function ImportarPage() {
   const [analiseClaude, setAnaliseClaude] = useState<string | null>(null);
   const [loadingClaude, setLoadingClaude] = useState(false);
 
+  // Totalmente automático: detecta o CNPJ pelo lote de XMLs e, em seguida,
+  // CONSULTA O BANCO para ver se essa empresa já é cliente cadastrado.
+  // - Se já existe: usa o nome/regime que JÁ ESTÁ no cadastro (fonte da verdade,
+  //   nunca muda sozinho por causa de uma importação futura, seja compra ou venda).
+  // - Se não existe: usa o CRT do XML quando disponível, ou Simples Nacional
+  //   como padrão (mais comum) quando o XML não trouxer CRT (ex: notas de
+  //   compra, onde a empresa aparece só como destinatária).
+  // Sem etapas manuais, sem confirmação — só passa a ser mais preciso.
   async function onFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const list = e.target.files;
     if (!list) return setFiles([]);
@@ -59,6 +68,7 @@ export default function ImportarPage() {
     setNome("");
     setCrtDetectado(null);
     setDetectadoAutomaticamente(false);
+    setOrigemRegime("");
 
     if (arr.length === 0) return;
 
@@ -66,15 +76,43 @@ export default function ImportarPage() {
     try {
       const textos = await Promise.all(arr.map((f) => f.text()));
       const detectada = detectarEmpresaPrincipal(textos);
-      if (detectada) {
-        setCnpj(detectada.cnpj);
-        setNome(detectada.nome);
-        setCrtDetectado(detectada.crt);
-        setRegime(crtParaRegime(detectada.crt));
-        setDetectadoAutomaticamente(true);
-      } else {
+      if (!detectada) {
         setErroGeral("Não foi possível detectar a empresa automaticamente nos XMLs selecionados. Verifique os arquivos.");
+        setDetectando(false);
+        return;
       }
+
+      setCnpj(detectada.cnpj);
+      setCrtDetectado(detectada.crt);
+
+      // Consulta automática: essa empresa já é cliente cadastrado?
+      let usouCadastroExistente = false;
+      try {
+        const lookup = await fetch(`/api/empresa-lookup?cnpj=${detectada.cnpj}`);
+        const dadosLookup = await lookup.json();
+        if (dadosLookup.ok && dadosLookup.existe) {
+          setNome(dadosLookup.nome);
+          setRegime(dadosLookup.regime);
+          setAnexo(dadosLookup.anexo_simples || "I");
+          setOrigemRegime("cadastro_existente");
+          usouCadastroExistente = true;
+        }
+      } catch {
+        // Se a consulta falhar (ex: rede), segue para o fallback pelo XML abaixo.
+      }
+
+      if (!usouCadastroExistente) {
+        setNome(detectada.nome);
+        if (detectada.crt !== null) {
+          setRegime(crtParaRegime(detectada.crt));
+          setOrigemRegime("xml_crt");
+        } else {
+          setRegime("SIMPLES");
+          setOrigemRegime("padrao");
+        }
+      }
+
+      setDetectadoAutomaticamente(true);
     } catch (err) {
       setErroGeral("Erro ao detectar empresa automaticamente: " + (err as Error).message);
     }
@@ -341,9 +379,19 @@ export default function ImportarPage() {
                   </div>
                 )}
 
-                {!detectando && detectadoAutomaticamente && (
+                {!detectando && detectadoAutomaticamente && origemRegime === "cadastro_existente" && (
                   <div className="text-xs text-emerald-800 bg-emerald-50 border border-emerald-300 rounded px-3 py-2">
-                    Empresa detectada automaticamente pelos XMLs. Confira abaixo antes de prosseguir.
+                    Empresa já cadastrada encontrada — nome e regime carregados automaticamente do cadastro existente.
+                  </div>
+                )}
+                {!detectando && detectadoAutomaticamente && origemRegime === "xml_crt" && (
+                  <div className="text-xs text-emerald-800 bg-emerald-50 border border-emerald-300 rounded px-3 py-2">
+                    Empresa detectada automaticamente pelos XMLs (regime lido do CRT).
+                  </div>
+                )}
+                {!detectando && detectadoAutomaticamente && origemRegime === "padrao" && (
+                  <div className="text-xs text-blue-800 bg-blue-50 border border-blue-300 rounded px-3 py-2">
+                    Empresa nova detectada. O regime não veio no XML (empresa aparece só como destinatária) — assumido Simples Nacional por padrão. Confira antes de prosseguir.
                   </div>
                 )}
 
@@ -357,17 +405,12 @@ export default function ImportarPage() {
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-xs font-medium text-slate-600 mb-1">Regime (via CRT do XML)</label>
+                    <label className="block text-xs font-medium text-slate-600 mb-1">Regime (detectado automaticamente)</label>
                     <select value={regime} onChange={(e) => setRegime(e.target.value)} className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm">
                       <option value="SIMPLES">Simples Nacional</option>
                       <option value="LUCRO_PRESUMIDO">Lucro Presumido</option>
                       <option value="LUCRO_REAL">Lucro Real</option>
                     </select>
-                    {crtDetectado === "3" && (
-                      <p className="text-[10px] text-amber-700 mt-1">
-                        CRT=3 detectado (Regime Normal). Assumido Lucro Presumido — confirme se não é Lucro Real.
-                      </p>
-                    )}
                   </div>
                   <div>
                     <label className="block text-xs font-medium text-slate-600 mb-1">Anexo (Simples)</label>
