@@ -501,22 +501,9 @@ export async function contabilizarLote(input: ContabilizarInput): Promise<Contab
     }
   }
 
-  // DAS unico sobre faturamento total (evita erro de arredondamento por nota)
-  if (regime === "SIMPLES" && aliqEfetiva > 0 && baseSaidaLote > 0) {
-    const fatTotalSaida = round(nfsProcessar.filter((n) => n.tipo_operacao === "SAIDA" && (n.finalidade === "VENDA" || n.finalidade === "SERVICO")).reduce((a, n) => a + n.valor_total, 0));
-    const dasTotal = Math.round(fatTotalSaida * aliqEfetiva * 100) / 100;
-    if (dasTotal > 0) {
-      const anoDas = new Date().getFullYear();
-      const diDas = anoDas + "-06-01";
-      await inserirLancamentoUnico(input.empresa_id, {
-        data: diDas, competencia: diDas, historico: "DAS Simples Nacional - " + anoDas,
-        id_nf: null, origem: "DAS", tipo_lanc: "NORMAL",
-        itens: [["4.2.08", dasTotal, 0], ["2.1.03.09", 0, dasTotal]],
-      });
-    }
-  }
-
-  await apurarImpostos(input.empresa_id, regime, Array.from(anos));
+  // DAS do Simples: calculado de forma consolidada dentro de apurarImpostos
+  // (sobre TODO o faturamento do mes no banco x aliquota efetiva), nao por lote.
+  await apurarImpostos(input.empresa_id, regime, Array.from(anos), aliqEfetiva);
 
   // IRPJ/CSLL (Presumido/Real)
   if (regime !== "SIMPLES") {
@@ -652,7 +639,7 @@ async function inserirLancamentoUnico(empresaId: number, lp: LancPreparado) {
   return row.id;
 }
 
-async function apurarImpostos(empresaId: number, regime: Regime, anos: number[]) {
+async function apurarImpostos(empresaId: number, regime: Regime, anos: number[], aliqDas = 0) {
   for (const ano of anos) {
     const ini = `${ano}-01-01`;
     const fim = `${ano}-12-31`;
@@ -660,14 +647,42 @@ async function apurarImpostos(empresaId: number, regime: Regime, anos: number[])
       .delete(apuracaoImpostos)
       .where(and(eq(apuracaoImpostos.empresa_id, empresaId), eq(apuracaoImpostos.periodo, String(ano))));
     if (regime === "SIMPLES") {
-      const r = await db.execute<{ v: string }>(sql`
-        SELECT COALESCE(SUM(li.credito),0)::text AS v FROM lancamento_itens li
-        JOIN lancamentos l ON li.id_lanc = l.id
-        WHERE li.codigo_conta = '2.1.03.09'
+      // DAS consolidado: faturamento total de SAIDA (venda/servico) do periodo
+      // JA no banco x aliquota efetiva. Um unico calculo, coerente com a aliquota
+      // exibida, independente de quantos lotes foram importados (LC 123/2006).
+      const fq = await db.execute<{ v: string }>(sql`
+        SELECT COALESCE(SUM(valor_total),0)::text AS v FROM notas_fiscais
+        WHERE empresa_id = ${empresaId}
+          AND tipo_operacao = 'SAIDA'
+          AND finalidade IN ('VENDA','SERVICO')
+          AND data_emissao BETWEEN ${ini}::date AND ${fim}::date
+      `);
+      const fatDas = round(Number(fq.rows[0]?.v ?? 0));
+      const dasAno = round(fatDas * aliqDas);
+      // Remove quaisquer lancamentos de DAS anteriores do periodo (por-lote antigos)
+      // para nao duplicar, e insere UM lancamento consolidado.
+      await db.execute(sql`
+        DELETE FROM lancamento_itens li USING lancamentos l
+        WHERE li.id_lanc = l.id
+          AND li.codigo_conta = '2.1.03.09'
           AND l.empresa_id = ${empresaId}
+          AND l.origem = 'DAS'
           AND l.competencia BETWEEN ${ini}::date AND ${fim}::date
       `);
-      const dasAno = round(Number(r.rows[0]?.v ?? 0));
+      await db.execute(sql`
+        DELETE FROM lancamentos
+        WHERE empresa_id = ${empresaId}
+          AND origem = 'DAS'
+          AND competencia BETWEEN ${ini}::date AND ${fim}::date
+      `);
+      if (dasAno > 0) {
+        const diDas = `${ano}-06-01`;
+        await inserirLancamentoUnico(empresaId, {
+          data: diDas, competencia: diDas, historico: `DAS Simples Nacional - ${ano}`,
+          id_nf: null, origem: "DAS", tipo_lanc: "NORMAL",
+          itens: [["4.2.08", dasAno, 0], ["2.1.03.09", 0, dasAno]],
+        });
+      }
       await db.insert(apuracaoImpostos).values({
         empresa_id: empresaId, periodo: String(ano),
         imposto: "DAS SIMPLES", debito: String(dasAno), credito: "0",
@@ -820,6 +835,3 @@ async function encerrarExercicio(empresaId: number, ano: number): Promise<number
     .where(and(eq(exercicios.empresa_id, empresaId), eq(exercicios.ano, ano)));
   return resultado;
 }
-
-
-
