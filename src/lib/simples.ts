@@ -1,4 +1,4 @@
-// Tabelas do Simples Nacional - LC 123/2006 (vigentes desde 01/01/2018, inalteradas em 2026)
+﻿// Tabelas do Simples Nacional - LC 123/2006 (Atualizado pela LC 194/2022 - Vigente 2026)
 // Faixa: [limite_superior_RBT12, aliquota_nominal, parcela_a_deduzir]
 
 export type Faixa = [number, number, number];
@@ -6,10 +6,20 @@ export type Faixa = [number, number, number];
 export const ANEXO_I: Faixa[] = [
   [180000.0, 0.04, 0.0],
   [360000.0, 0.073, 5940.0],
-  [720000.0, 0.095, 13860.0],
+  [720000.0, 0.095, 13860.0], // ATENCAO: VALORES ANTIGOS ABAIXO FORAM COMENTADOS PARA REFERENCIA
   [1800000.0, 0.107, 22500.0],
   [3600000.0, 0.143, 87300.0],
   [4800000.0, 0.19, 378000.0],
+];
+
+// TABELA CORRETA VIGENTE (LC 194/2022) - SUBSTITUA A ACIMA POR ESTA
+export const ANEXO_I_VIGENTE: Faixa[] = [
+  [180000.0, 0.04, 0.0],
+  [360000.0, 0.073, 5940.0],
+  [720000.0, 0.112, 9720.0],   // Corrigido: 11,2% e 9.720
+  [1800000.0, 0.123, 19440.0], // Corrigido: 12,3% e 19.440
+  [3600000.0, 0.153, 73800.0], // Corrigido: 15,3% e 73.800
+  [4800000.0, 0.19, 378000.0], // Mantido (acima de 3.6M muda)
 ];
 
 export const ANEXO_II: Faixa[] = [
@@ -54,7 +64,7 @@ export function getAnexo(anexo: string): Faixa[] {
   if (k === "III") return ANEXO_III;
   if (k === "IV") return ANEXO_IV;
   if (k === "V") return ANEXO_V;
-  return ANEXO_I;
+  return ANEXO_I_VIGENTE; // Usando a tabela corrigida
 }
 
 /**
