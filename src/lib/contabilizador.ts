@@ -1,4 +1,4 @@
-// Motor de contabilização OTIMIZADO - batch inserts + transação
+﻿// Motor de contabilização OTIMIZADO - batch inserts + transação
 // Suporta Simples, Lucro Presumido e Lucro Real + Reforma Tributária 2026-2033
 
 import { db } from "@/db";
@@ -114,7 +114,25 @@ export async function contabilizarLote(input: ContabilizarInput): Promise<Contab
     LUCRO_PRESUMIDO: 0.0365,
     SIMPLES: 0.0,
   };
-  const cmv_percent = input.cmv_percent ?? 0.6;
+  const cmvRealQ = await db.execute<{ compras: string; vendas: string }>(sql`
+    SELECT
+      COALESCE(SUM(CASE WHEN tipo_operacao = 'ENTRADA' THEN valor_produtos ELSE 0 END), 0)::text AS compras,
+      COALESCE(SUM(CASE WHEN tipo_operacao = 'SAIDA' THEN valor_produtos ELSE 0 END), 0)::text AS vendas
+    FROM notas_fiscais
+    WHERE empresa_id = ${input.empresa_id}
+  `);
+  const comprasReais = Number(cmvRealQ.rows[0]?.compras ?? 0);
+  const vendasReais = Number(cmvRealQ.rows[0]?.vendas ?? 0);
+  // Se ja existem compras (ENTRADA) reais registradas para esta empresa, calcula
+  // o CMV pela proporcao real compras/vendas em vez do percentual estimado fixo.
+  // So cai no percentual estimado (default 60%) quando ainda nao ha nenhuma
+  // compra real importada -- assim o DRE fica preciso assim que o cliente
+  // importar as notas de compra, sem precisar de nenhuma configuracao manual.
+  const cmvRealDisponivel = comprasReais > 0 && vendasReais > 0;
+  const cmv_percent_calculado = cmvRealDisponivel
+    ? Math.min(0.95, Math.max(0.05, comprasReais / vendasReais))
+    : (input.cmv_percent ?? 0.6);
+  const cmv_percent = cmv_percent_calculado;
   const recupera_ipi = !!input.recupera_ipi;
   const aliqMono = aliqCreditoMono[regime];
 
@@ -835,3 +853,4 @@ async function encerrarExercicio(empresaId: number, ano: number): Promise<number
     .where(and(eq(exercicios.empresa_id, empresaId), eq(exercicios.ano, ano)));
   return resultado;
 }
+
