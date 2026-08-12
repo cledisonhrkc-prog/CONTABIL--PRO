@@ -1,4 +1,4 @@
-// Parser universal — funciona tanto em Node.js (servidor) quanto no navegador.
+﻿// Parser universal — funciona tanto em Node.js (servidor) quanto no navegador.
 // fast-xml-parser não tem dependências nativas, roda em qualquer lugar.
 import { XMLParser } from "fast-xml-parser";
 
@@ -223,4 +223,74 @@ export function parseNfeXml(xml: string, cnpjEmpresa: string): NF {
     valor_iss: +v_iss.toFixed(2),
     itens,
   };
+}
+
+// ===== DETECÇÃO AUTOMÁTICA DA EMPRESA A PARTIR DO LOTE DE XMLs =====
+// Usado quando ainda não há empresa cadastrada: em vez de usar CNPJ/nome/regime
+// fixos (bug antigo), o sistema conta qual CNPJ mais aparece no lote (como emit
+// ou dest) e assume que essa é a empresa do usuário.
+
+export type EmpresaDetectada = {
+  cnpj: string;
+  nome: string;
+  crt: string | null; // null = não foi possível confirmar (empresa só apareceu como destinatária)
+};
+
+export function crtParaRegime(crt: string | null): "SIMPLES" | "LUCRO_PRESUMIDO" | "LUCRO_REAL" {
+  if (crt === "1" || crt === "2") return "SIMPLES";
+  return "LUCRO_PRESUMIDO"; // CRT 3 ou desconhecido: default mais comum, conferir manualmente se for Real
+}
+
+export function detectarEmpresaPrincipal(xmls: string[]): EmpresaDetectada | null {
+  const contagem = new Map<string, { nome: string; crt: string | null; count: number }>();
+
+  for (const xml of xmls) {
+    try {
+      const obj = parser.parse(xml) as Record<string, unknown>;
+      const root: unknown =
+        (obj as { nfeProc?: { NFe?: { infNFe?: unknown } }; NFe?: { infNFe?: unknown } }).nfeProc?.NFe?.infNFe ??
+        (obj as { NFe?: { infNFe?: unknown } }).NFe?.infNFe ??
+        null;
+      if (!root) continue;
+      const inf = root as Record<string, unknown>;
+      const emit = (inf.emit ?? {}) as Record<string, unknown>;
+      const dest = (inf.dest ?? {}) as Record<string, unknown>;
+
+      const cnpjEmit = digits(firstOf(emit.CNPJ, emit.CPF));
+      const nomeEmit = String(emit.xNome ?? "");
+      const crtEmit = emit.CRT ? String(emit.CRT) : null;
+
+      const cnpjDest = digits(firstOf(dest.CNPJ, dest.CPF));
+      const nomeDest = String(dest.xNome ?? "");
+
+      if (cnpjEmit) {
+        const atual = contagem.get(cnpjEmit) ?? { nome: nomeEmit, crt: crtEmit, count: 0 };
+        atual.count += 1;
+        if (!atual.crt && crtEmit) atual.crt = crtEmit;
+        if (!atual.nome && nomeEmit) atual.nome = nomeEmit;
+        contagem.set(cnpjEmit, atual);
+      }
+      if (cnpjDest) {
+        const atual = contagem.get(cnpjDest) ?? { nome: nomeDest, crt: null, count: 0 };
+        atual.count += 1;
+        if (!atual.nome && nomeDest) atual.nome = nomeDest;
+        contagem.set(cnpjDest, atual);
+      }
+    } catch {
+      continue; // XML inválido nesse item — ignora na detecção, parseNfeXml individual reporta o erro depois
+    }
+  }
+
+  if (contagem.size === 0) return null;
+
+  let melhorCnpj = "";
+  let melhor = { nome: "", crt: null as string | null, count: -1 };
+  for (const [cnpj, dado] of contagem) {
+    if (dado.count > melhor.count) {
+      melhorCnpj = cnpj;
+      melhor = dado;
+    }
+  }
+
+  return { cnpj: melhorCnpj, nome: melhor.nome || "EMPRESA IMPORTADA", crt: melhor.crt };
 }
