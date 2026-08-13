@@ -1,4 +1,3 @@
-// =============================================================================
 // REFORMA TRIBUTÁRIA — EC 132/2023 + LC 214/2025
 // Cronograma oficial de implementação:
 //   2026: CBS 0,9% e IBS 0,1% (teste, compensáveis com PIS/COFINS)
@@ -15,6 +14,7 @@ export const CBS_ALIQUOTA_2026 = 0.009; // 0,9% teste
 export const IBS_ALIQUOTA_2026 = 0.001; // 0,1% teste
 export const CBS_ALIQUOTA_2027 = 0.088; // 8,8% - alíquota cheia federal
 export const IBS_ALIQUOTA_2029_INICIAL = 0.001; // começa muito pequena, sobe até 17,7% em 2033
+export const IBS_ALIQUOTA_2033 = 0.177; // 17,7% - alíquota cheia de referência
 
 // Alíquota de referência para o Imposto Seletivo (IS - "imposto do pecado")
 // Percentuais indicativos do MF; alíquota final vem em Decreto anual.
@@ -88,11 +88,13 @@ export type ImpostosReforma = {
  * @param baseCalculo valor do produto/serviço
  * @param ncm NCM do produto (para IS)
  * @param modo modo da reforma
+ * @param ano ano de emissão da nota (necessário para escalonar o IBS em 2029-2032)
  */
 export function calcularImpostosReforma(
   baseCalculo: number,
   ncm: string,
-  modo: ModoReforma
+  modo: ModoReforma,
+  ano?: number
 ): ImpostosReforma {
   const ncmLimpo = (ncm || "").replace(/\D/g, "");
   const categoriaIS = NCM_SELETIVOS[ncmLimpo] ?? null;
@@ -131,9 +133,12 @@ export function calcularImpostosReforma(
       };
 
     case "REFORMA_2029": {
-      // IBS começa a subir; ICMS/ISS decrescem
-      const anoOffset = 0; // aqui poderia usar (ano - 2029) para escalonar
-      const aliqIBS = 0.001 + anoOffset * 0.044;
+      // IBS sobe progressivamente de 2029 até 2032, indo de ~0,1% até
+      // próximo da alíquota cheia (17,7%) que só é atingida de fato em 2033.
+      // Escalonamento linear em 4 passos (2029, 2030, 2031, 2032).
+      const anoValido = ano ?? 2029;
+      const anoOffset = Math.max(0, Math.min(3, anoValido - 2029));
+      const aliqIBS = IBS_ALIQUOTA_2029_INICIAL + anoOffset * ((IBS_ALIQUOTA_2033 - IBS_ALIQUOTA_2029_INICIAL) / 4);
       return {
         cbs: +(baseCalculo * CBS_ALIQUOTA_2027).toFixed(2),
         ibs: +(baseCalculo * aliqIBS).toFixed(2),
@@ -149,7 +154,7 @@ export function calcularImpostosReforma(
       // IBS a alíquota cheia; ICMS e ISS extintos
       return {
         cbs: +(baseCalculo * CBS_ALIQUOTA_2027).toFixed(2),
-        ibs: +(baseCalculo * 0.177).toFixed(2), // 17,7% referência
+        ibs: +(baseCalculo * IBS_ALIQUOTA_2033).toFixed(2), // 17,7% referência
         is: +(baseCalculo * aliqIS).toFixed(2),
         extingue_pis_cofins: true,
         extingue_ipi: true,
@@ -168,9 +173,10 @@ export function calcularImpostosNotaReforma(
   dataEmissao: string
 ): { cbs: number; ibs: number; is: number; modo: ModoReforma; total_seletivos: number } {
   const modo = modoReformaParaData(dataEmissao);
+  const ano = parseInt(dataEmissao.substring(0, 4), 10);
   let cbs = 0, ibs = 0, is = 0, total_seletivos = 0;
   for (const it of itens) {
-    const imp = calcularImpostosReforma(it.vprod, it.ncm, modo);
+    const imp = calcularImpostosReforma(it.vprod, it.ncm, modo, ano);
     cbs += imp.cbs;
     ibs += imp.ibs;
     is += imp.is;
