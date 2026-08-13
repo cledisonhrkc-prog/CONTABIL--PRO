@@ -1,8 +1,6 @@
 "use client";
-
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-
 const menu: Array<{ label: string; href: string; icon: string; group?: string }> = [
   { label: "Dashboard", href: "/", icon: "🏠" },
   { label: "Empresa", href: "/empresa", icon: "🏢" },
@@ -16,6 +14,7 @@ const menu: Array<{ label: string; href: string; icon: string; group?: string }>
   { label: "Balancete", href: "/balancete", icon: "⚖️" },
   { label: "DRE / Balanço", href: "/dre", icon: "📈" },
   { label: "Auditoria R08", href: "/auditoria", icon: "🔍" },
+  { label: "Obrigações Acessórias", href: "/obrigacoes", icon: "📋" },
   { label: "Reforma 2027", href: "/reforma", icon: "🇧🇷" },
   { label: "Comparativo Regimes", href: "/comparativo", icon: "🏛️" },
   { label: "Conciliação (vs Colab)", href: "/conciliacao", icon: "🔍" },
@@ -24,7 +23,6 @@ const menu: Array<{ label: string; href: string; icon: string; group?: string }>
   { label: "SPED / Exportar", href: "/exportar", icon: "💾" },
   { label: "Configurações", href: "/configuracoes", icon: "⚙️" },
 ];
-
 export default function Sidebar() {
   const path = usePathname();
   return (
