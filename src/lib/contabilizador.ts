@@ -854,3 +854,94 @@ async function encerrarExercicio(empresaId: number, ano: number): Promise<number
   return resultado;
 }
 
+
+// ============================================================
+// RECÁLCULO RETROATIVO DE CMV REAL
+// Use esta função quando notas de COMPRA (ENTRADA) forem importadas
+// DEPOIS das notas de VENDA (SAIDA) já contabilizadas. Ela recalcula
+// o cmv_percent real (compras reais / vendas reais) e ajusta todos os
+// lançamentos de CMV já gravados, sem precisar apagar e reimportar nada.
+// ============================================================
+export async function recalcularCmvReal(empresaId: number): Promise<{
+  ok: boolean;
+  mensagem: string;
+  cmv_percent_antigo?: number;
+  cmv_percent_novo?: number;
+  notas_ajustadas?: number;
+}> {
+  const cmvRealQ = await db.execute<{ compras: string; vendas: string }>(sql`
+    SELECT
+      COALESCE(SUM(CASE WHEN tipo_operacao = 'ENTRADA' THEN valor_produtos ELSE 0 END), 0)::text AS compras,
+      COALESCE(SUM(CASE WHEN tipo_operacao = 'SAIDA' THEN valor_produtos ELSE 0 END), 0)::text AS vendas
+    FROM notas_fiscais
+    WHERE empresa_id = ${empresaId}
+  `);
+  const comprasReais = Number(cmvRealQ.rows[0]?.compras ?? 0);
+  const vendasReais = Number(cmvRealQ.rows[0]?.vendas ?? 0);
+
+  if (comprasReais <= 0 || vendasReais <= 0) {
+    return {
+      ok: false,
+      mensagem: "Não há compras e vendas suficientes para calcular o CMV real. Nada foi alterado.",
+    };
+  }
+
+  const empresaAtual = await db.select().from(empresas).where(eq(empresas.id, empresaId)).limit(1);
+  const cmvPercentAntigo = Number(empresaAtual[0]?.cmv_percent ?? 0.6);
+
+  const cmvPercentNovo = Math.min(0.95, Math.max(0.05, comprasReais / vendasReais));
+
+  // Ajusta os itens dos lançamentos de CMV já gravados, proporcional ao
+  // valor_produtos real de cada nota de venda.
+  const ajuste = await db.execute<{ id_lanc: number }>(sql`
+    WITH novo AS (
+      SELECT l.id AS id_lanc, ROUND(nf.valor_produtos * ${cmvPercentNovo}, 2) AS novo_cmv
+      FROM lancamentos l
+      JOIN notas_fiscais nf ON l.id_nf = nf.id
+      WHERE l.empresa_id = ${empresaId}
+        AND l.historico LIKE 'CMV NF %'
+        AND l.tipo_lanc = 'NORMAL'
+    )
+    UPDATE lancamento_itens li
+    SET debito = CASE WHEN li.codigo_conta = '5.1.01' THEN novo.novo_cmv ELSE li.debito END,
+        credito = CASE WHEN li.codigo_conta = '1.1.03.01' THEN novo.novo_cmv ELSE li.credito END
+    FROM novo
+    WHERE li.id_lanc = novo.id_lanc
+      AND li.codigo_conta IN ('5.1.01', '1.1.03.01')
+    RETURNING li.id_lanc
+  `);
+
+  await db.execute(sql`
+    UPDATE lancamentos l
+    SET valor_total = ROUND(nf.valor_produtos * ${cmvPercentNovo}, 2)
+    FROM notas_fiscais nf
+    WHERE l.id_nf = nf.id
+      AND l.empresa_id = ${empresaId}
+      AND l.historico LIKE 'CMV NF %'
+      AND l.tipo_lanc = 'NORMAL'
+  `);
+
+  // Recalcula o(s) exercício(s) afetados, para o balanço fechar de novo
+  // com o CMV corrigido (reabre e refaz o lançamento de ENCERRAMENTO).
+  const exerciciosQ = await db.execute<{ exercicio: number }>(sql`
+    SELECT DISTINCT exercicio FROM lancamentos
+    WHERE empresa_id = ${empresaId} AND historico LIKE 'CMV NF %'
+  `);
+  for (const row of exerciciosQ.rows) {
+    await encerrarExercicio(empresaId, Number(row.exercicio));
+  }
+
+  await db
+    .update(empresas)
+    .set({ cmv_percent: String(cmvPercentNovo) })
+    .where(eq(empresas.id, empresaId));
+
+  return {
+    ok: true,
+    mensagem: "CMV recalculado com sucesso usando os dados reais de compras e vendas.",
+    cmv_percent_antigo: cmvPercentAntigo,
+    cmv_percent_novo: cmvPercentNovo,
+    notas_ajustadas: ajuste.rows.length,
+  };
+}
+

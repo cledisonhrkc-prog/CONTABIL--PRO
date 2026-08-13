@@ -1,0 +1,504 @@
+﻿"use client";
+
+import { useState } from "react";
+import Sidebar from "@/components/Sidebar";
+import Topbar from "@/components/Topbar";
+import { parseNfeXml, type NF } from "@/lib/nfe-parser";
+import { preValidar, formatarPreValidacaoTexto, type PreValidacaoResumo } from "@/lib/pre-validacao";
+
+type UploadLote = {
+  processadas: number;
+  parseErros: Array<{ arquivo: string; erro: string }>;
+  lancamentos: number;
+  tempoMs: number;
+  tempoParseMs: number;
+  aliqEfetiva: number;
+  auditR08Erros: number;
+  auditR08Credito: number;
+  rbt12: number;
+  rbt12Estimado: boolean;
+  dedup_recebidas: number;
+  dedup_canceladas: number;
+  dedup_no_lote: number;
+  dedup_no_banco: number;
+};
+
+// PLANO B: XMLs sÃ£o parseados NO NAVEGADOR (fast-xml-parser Ã© universal)
+// e enviados como JSON compacto. Payload de 200 notas ~ 100 KB (vs 4-8 MB de XML).
+// Assim damos volta no limite de 4.5 MB da Vercel sem esforÃ§o.
+const CHUNK_JSON = 200; // notas por request
+
+export default function ImportarPage() {
+  const [files, setFiles] = useState<File[]>([]);
+  const [regime, setRegime] = useState("SIMPLES");
+  const [anexo, setAnexo] = useState("I");
+  const [rbt12, setRbt12] = useState<string>("");
+  const [cnpj, setCnpj] = useState("03000000000191");
+  const [nome, setNome] = useState("EMPRESA IMPORTADA LTDA");
+  const [running, setRunning] = useState(false);
+  const [progresso, setProgresso] = useState<{ fase: string; atual: number; total: number } | null>(null);
+  const [resumo, setResumo] = useState<UploadLote | null>(null);
+  const [erroGeral, setErroGeral] = useState<string>("");
+
+  // PrÃ©-validaÃ§Ã£o por IA (bloqueia contabilizaÃ§Ã£o)
+  const [preValidacao, setPreValidacao] = useState<PreValidacaoResumo | null>(null);
+  const [textoIA, setTextoIA] = useState<string>("");
+  const [nfsParaContabilizar, setNfsParaContabilizar] = useState<NF[] | null>(null);
+  const [copiado, setCopiado] = useState(false);
+
+  function onFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const list = e.target.files;
+    if (!list) return setFiles([]);
+    const arr = Array.from(list).filter((f) => f.name.toLowerCase().endsWith(".xml"));
+    setFiles(arr);
+    setErroGeral("");
+    setResumo(null);
+  }
+
+  // Parse local â€” MUITO rÃ¡pido, tudo em memÃ³ria do navegador
+  async function parseArquivosLocal(): Promise<{ nfs: NF[]; erros: Array<{ arquivo: string; erro: string }> }> {
+    const nfs: NF[] = [];
+    const erros: Array<{ arquivo: string; erro: string }> = [];
+    const cnpjLimpo = cnpj.replace(/\D/g, "");
+    for (let i = 0; i < files.length; i++) {
+      const f = files[i];
+      try {
+        const xml = await f.text();
+        nfs.push(parseNfeXml(xml, cnpjLimpo));
+      } catch (e) {
+        erros.push({ arquivo: f.name, erro: (e as Error).message.substring(0, 200) });
+      }
+      // Progresso a cada 50 arquivos (nÃ£o spam)
+      if (i % 50 === 0 || i === files.length - 1) {
+        setProgresso({ fase: "ðŸ” Parseando XMLs no navegador", atual: i + 1, total: files.length });
+        // Yield ao browser pra nÃ£o travar a UI
+        await new Promise((r) => setTimeout(r, 0));
+      }
+    }
+    return { nfs, erros };
+  }
+
+  async function enviarLoteJson(nfs: NF[]): Promise<{
+    ok: boolean;
+    processadas?: number;
+    result?: {
+      lancamentos: number;
+      aliquotaEfetivaSimples: number;
+      rbt12Usado: number;
+      rbt12Estimado: boolean;
+      tempoMs?: number;
+      dedup?: {
+        recebidas: number;
+        canceladas_ou_denegadas: number;
+        duplicadas_no_lote: number;
+        duplicadas_no_banco: number;
+        unicas_processadas: number;
+        rejeicoes_por_status?: Record<string, number>;
+      };
+      auditoriaR08: { erros: number; creditoRecuperavel: number };
+    };
+    error?: string;
+  }> {
+    let resp: Response;
+    try {
+      resp = await fetch("/api/upload-json", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cnpj, nome, regime, anexo, rbt12: rbt12 ? Number(rbt12) : null, nfs }),
+      });
+    } catch (e) {
+      return { ok: false, error: "Falha de rede: " + (e as Error).message };
+    }
+    const text = await resp.text();
+    if (!resp.ok) {
+      return {
+        ok: false,
+        error:
+          resp.status === 413
+            ? `HTTP 413 (Payload too large). Reduza CHUNK_JSON (atual: ${CHUNK_JSON}).`
+            : resp.status === 504
+            ? `HTTP 504 (Timeout). Reduza CHUNK_JSON ou use plano B++ (Railway/Fly.io).`
+            : `HTTP ${resp.status}: ${text.substring(0, 250)}`,
+      };
+    }
+    try {
+      return JSON.parse(text);
+    } catch {
+      return { ok: false, error: "Resposta nÃ£o-JSON: " + text.substring(0, 250) };
+    }
+  }
+
+  // PASSO 1: parse + prÃ©-validaÃ§Ã£o (NÃƒO contabiliza ainda â€” pausa pra IA revisar)
+  async function preValidarLote() {
+    if (files.length === 0) return alert("Selecione arquivos XML");
+    setRunning(true);
+    setErroGeral("");
+    setResumo(null);
+    setPreValidacao(null);
+    setNfsParaContabilizar(null);
+
+    const { nfs, erros: parseErros } = await parseArquivosLocal();
+    if (nfs.length === 0) {
+      setErroGeral(`Nenhum XML vÃ¡lido. ${parseErros.length} arquivo(s) com erro de parse.`);
+      setRunning(false);
+      setProgresso(null);
+      return;
+    }
+
+    setProgresso({ fase: "ðŸ” Executando prÃ©-validaÃ§Ã£o estruturada...", atual: 1, total: 1 });
+    const pv = preValidar(nfs);
+    const texto = formatarPreValidacaoTexto(pv);
+    setPreValidacao(pv);
+    setTextoIA(texto);
+    setNfsParaContabilizar(nfs);
+    setRunning(false);
+    setProgresso(null);
+  }
+
+  // PASSO 2: contabilizar APÃ“S aprovaÃ§Ã£o humana da prÃ©-validaÃ§Ã£o
+  async function contabilizarAgora() {
+    const nfs = nfsParaContabilizar;
+    if (!nfs || nfs.length === 0) return;
+    setRunning(true);
+    setErroGeral("");
+
+    const totalChunks = Math.ceil(nfs.length / CHUNK_JSON);
+    const acumulado: UploadLote = {
+      processadas: 0,
+      parseErros: [],
+      lancamentos: 0,
+      tempoMs: 0,
+      tempoParseMs: 0,
+      aliqEfetiva: 0,
+      auditR08Erros: 0,
+      auditR08Credito: 0,
+      rbt12: 0,
+      rbt12Estimado: false,
+      dedup_recebidas: 0,
+      dedup_canceladas: 0,
+      dedup_no_lote: 0,
+      dedup_no_banco: 0,
+    };
+
+    for (let i = 0; i < totalChunks; i++) {
+      const chunk = nfs.slice(i * CHUNK_JSON, (i + 1) * CHUNK_JSON);
+      setProgresso({
+        fase: `ðŸ“¤ Contabilizando (lote ${i + 1}/${totalChunks})`,
+        atual: i + 1,
+        total: totalChunks,
+      });
+      const r = await enviarLoteJson(chunk);
+      if (!r.ok) {
+        setErroGeral(`Falhou no lote ${i + 1}: ${r.error}`);
+        setRunning(false);
+        setProgresso(null);
+        return;
+      }
+      acumulado.processadas += r.processadas ?? 0;
+      if (r.result) {
+        acumulado.lancamentos = r.result.lancamentos;
+        acumulado.tempoMs += r.result.tempoMs ?? 0;
+        acumulado.aliqEfetiva = r.result.aliquotaEfetivaSimples;
+        acumulado.auditR08Erros += r.result.auditoriaR08.erros;
+        acumulado.auditR08Credito += r.result.auditoriaR08.creditoRecuperavel;
+        acumulado.rbt12 = r.result.rbt12Usado;
+        acumulado.rbt12Estimado = r.result.rbt12Estimado;
+        if (r.result.dedup) {
+          acumulado.dedup_recebidas += r.result.dedup.recebidas;
+          acumulado.dedup_canceladas += r.result.dedup.canceladas_ou_denegadas;
+          acumulado.dedup_no_lote += r.result.dedup.duplicadas_no_lote;
+          acumulado.dedup_no_banco += r.result.dedup.duplicadas_no_banco;
+        }
+      }
+    }
+    setResumo(acumulado);
+    setPreValidacao(null);
+    setNfsParaContabilizar(null);
+    setRunning(false);
+    setProgresso(null);
+  }
+
+  async function copiarTextoIA() {
+    try {
+      await navigator.clipboard.writeText(textoIA);
+      setCopiado(true);
+      setTimeout(() => setCopiado(false), 2500);
+    } catch {
+      alert("NÃ£o conseguiu copiar. Selecione manualmente.");
+    }
+  }
+
+  const totalMB = (files.reduce((a, f) => a + f.size, 0) / 1024 / 1024).toFixed(2);
+
+  return (
+    <div className="flex min-h-screen">
+      <Sidebar />
+      <div className="flex-1 flex flex-col min-w-0">
+        <Topbar />
+        <main className="flex-1 p-6">
+          <div className="mb-6 bg-emerald-50 border-l-4 border-emerald-500 rounded p-4">
+            <h1 className="text-2xl font-bold text-slate-800 mb-1">Importar NF-e (XML) â€” Plano B âš¡</h1>
+            <p className="text-sm text-slate-700">
+              <b>Parse dos XMLs feito NO NAVEGADOR</b> (nÃ£o pesa no servidor). SÃ³ o resumo estruturado Ã© enviado como JSON.
+              Payload ~20Ã— menor. Suporta <b>milhares de notas</b> na Vercel sem estourar os 4.5 MB.
+            </p>
+          </div>
+
+          <div className="grid lg:grid-cols-1 gap-6 max-w-3xl">
+            <div className="bg-white border border-slate-200 rounded-lg p-6">
+              <h2 className="font-semibold text-slate-800 mb-4">ðŸ“¤ Upload em massa de XMLs</h2>
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">CNPJ da empresa</label>
+                  <input value={cnpj} onChange={(e) => setCnpj(e.target.value)} className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">Nome da empresa</label>
+                  <input value={nome} onChange={(e) => setNome(e.target.value)} className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm" />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-slate-600 mb-1">Regime</label>
+                    <select value={regime} onChange={(e) => setRegime(e.target.value)} className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm">
+                      <option value="SIMPLES">Simples Nacional</option>
+                      <option value="LUCRO_PRESUMIDO">Lucro Presumido</option>
+                      <option value="LUCRO_REAL">Lucro Real</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-600 mb-1">Anexo (Simples)</label>
+                    <select value={anexo} onChange={(e) => setAnexo(e.target.value)} className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm">
+                      <option value="I">I â€” ComÃ©rcio</option>
+                      <option value="II">II â€” IndÃºstria</option>
+                      <option value="III">III â€” ServiÃ§os</option>
+                      <option value="IV">IV â€” Especializados</option>
+                      <option value="V">V â€” Tecnologia</option>
+                    </select>
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">
+                    RBT12 â€” Receita Bruta Ãºltimos 12 meses (opcional)
+                  </label>
+                  <input value={rbt12} onChange={(e) => setRbt12(e.target.value)} placeholder="Ex.: 600000" className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm" />
+                  <p className="text-[11px] text-slate-500 mt-1">
+                    âš ï¸ NÃƒO Ã© o faturamento do mÃªs nem do lote. Ã‰ o total dos <b>Ãºltimos 12 meses</b> da empresa.
+                    Se deixar vazio, o sistema estima (lote Ã— 12).
+                  </p>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">Arquivos XML (selecione centenas ou milhares)</label>
+                  <input type="file" multiple accept=".xml" onChange={onFileChange} className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm" />
+                  {files.length > 0 && (
+                    <div className="text-xs text-slate-600 mt-1 space-y-0.5">
+                      <div>ðŸ“¦ <b>{files.length}</b> XMLs Â· {totalMB} MB no disco</div>
+                      <div>âš¡ Vai virar {Math.ceil(files.length / CHUNK_JSON)} lote(s) JSON de ~{Math.min(files.length, CHUNK_JSON)} notas</div>
+                    </div>
+                  )}
+                </div>
+                <button
+                  onClick={preValidarLote}
+                  disabled={running || files.length === 0}
+                  className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 text-white rounded-md font-medium"
+                >
+                  {running ? "Analisando..." : `ðŸ” PASSO 1: PrÃ©-validar ${files.length} XMLs (antes de contabilizar)`}
+                </button>
+                <p className="text-[11px] text-slate-500 mt-2">
+                  Vai parsear os XMLs no navegador e gerar um dossiÃª estruturado para vocÃª mandar
+                  na IA (ChatGPT/Claude/Gemini) analisar ANTES da contabilizaÃ§Ã£o. Nenhum dado Ã©
+                  gravado ainda.
+                </p>
+              </div>
+            </div>
+
+          </div>
+
+          <div className="mt-4 text-xs text-slate-400">
+            ðŸ’¡ Precisa popular dados fictÃ­cios pra teste interno? VÃ¡ em{" "}
+            <a href="/setup" className="text-slate-600 underline">/setup</a>.
+          </div>
+
+          {preValidacao && !running && (
+            <div className="mt-6 space-y-4">
+              {/* Alerta topo */}
+              <div className="bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-lg p-5">
+                <div className="flex items-center gap-3">
+                  <span className="text-3xl">ðŸ”</span>
+                  <div className="flex-1">
+                    <h2 className="text-lg font-bold">PASSO 1 concluÃ­do â€” DossiÃª pronto pra IA</h2>
+                    <p className="text-sm text-purple-100">
+                      Os {preValidacao.total_xmls_recebidos} XMLs foram parseados e analisados. Nenhum dado foi gravado no banco ainda.
+                      Copie o dossiÃª, mande na IA de sua preferÃªncia, e SÃ“ DEPOIS clique em &quot;Contabilizar&quot;.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Resumo visual da prÃ©-validaÃ§Ã£o */}
+              <div className="grid md:grid-cols-4 gap-3">
+                <div className="bg-white border border-slate-200 rounded p-3">
+                  <div className="text-[10px] text-slate-500 font-bold">XMLs RECEBIDOS</div>
+                  <div className="text-2xl font-bold text-slate-800">{preValidacao.total_xmls_recebidos}</div>
+                </div>
+                <div className="bg-white border border-emerald-200 rounded p-3">
+                  <div className="text-[10px] text-emerald-700 font-bold">NOTAS VÃLIDAS ÃšNICAS</div>
+                  <div className="text-2xl font-bold text-emerald-700">{preValidacao.totais_filtrados.qtd_notas_validas}</div>
+                  <div className="text-[10px] text-slate-500">apÃ³s dedup + filtro cStat</div>
+                </div>
+                <div className="bg-white border border-slate-200 rounded p-3">
+                  <div className="text-[10px] text-slate-500 font-bold">FATURAMENTO LÃQUIDO</div>
+                  <div className="text-lg font-bold text-slate-800">R$ {preValidacao.totais_filtrados.faturamento_liquido_st.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</div>
+                </div>
+                <div className={`bg-white border rounded p-3 ${preValidacao.alertas.filter(a => a.severidade === "ERRO").length > 0 ? "border-red-300" : "border-slate-200"}`}>
+                  <div className="text-[10px] text-slate-500 font-bold">ALERTAS</div>
+                  <div className="text-2xl font-bold text-slate-800">{preValidacao.alertas.length}</div>
+                  <div className="text-[10px] text-slate-500">
+                    {preValidacao.alertas.filter(a => a.severidade === "ERRO").length} erros Â· {preValidacao.alertas.filter(a => a.severidade === "AVISO").length} avisos
+                  </div>
+                </div>
+              </div>
+
+              {/* Status SEFAZ */}
+              <div className="bg-white border border-slate-200 rounded-lg p-4">
+                <h3 className="font-semibold text-slate-800 mb-2">ðŸ“‹ DistribuiÃ§Ã£o por Status SEFAZ (cStat)</h3>
+                <div className="flex flex-wrap gap-2 text-xs">
+                  {Object.entries(preValidacao.por_status).map(([cs, qtd]) => {
+                    const ok = cs === "100" || cs === "150";
+                    return (
+                      <div key={cs} className={`px-3 py-1.5 rounded ${ok ? "bg-emerald-50 text-emerald-800" : "bg-red-50 text-red-800"}`}>
+                        <b>cStat {cs}:</b> {qtd} nota(s) {ok ? "âœ“" : "âœ— excluÃ­da(s)"}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Alertas crÃ­ticos */}
+              {preValidacao.alertas.filter(a => a.severidade === "ERRO").length > 0 && (
+                <div className="bg-red-50 border border-red-300 rounded-lg p-4">
+                  <h3 className="font-semibold text-red-900 mb-2">ðŸš¨ Erros crÃ­ticos detectados</h3>
+                  <ul className="text-xs text-red-900 space-y-1 max-h-40 overflow-y-auto">
+                    {preValidacao.alertas.filter(a => a.severidade === "ERRO").slice(0, 15).map((a, i) => (
+                      <li key={i}>â€¢ <b>[{a.categoria}]</b> {a.nota}: {a.descricao}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {/* BotÃµes IA */}
+              <div className="bg-white border border-slate-200 rounded-lg p-5">
+                <h3 className="font-semibold text-slate-800 mb-3">ðŸ¤– Enviar dossiÃª pra IA validar (antes de gravar no banco)</h3>
+                <div className="flex flex-wrap gap-2 mb-3">
+                  <button
+                    onClick={copiarTextoIA}
+                    className={`px-5 py-2.5 rounded-md font-medium text-sm text-white ${copiado ? "bg-emerald-600" : "bg-purple-600 hover:bg-purple-700"}`}
+                  >
+                    {copiado ? "âœ… Copiado! Cole na IA" : `ðŸ“‹ Copiar dossiÃª (${(textoIA.length / 1024).toFixed(0)} KB, ~${Math.ceil(textoIA.length / 4).toLocaleString("pt-BR")} tokens)`}
+                  </button>
+                  <a href="https://chatgpt.com/" target="_blank" rel="noopener" className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-md text-sm">ðŸ¤– ChatGPT</a>
+                  <a href="https://claude.ai/new" target="_blank" rel="noopener" className="px-4 py-2.5 bg-orange-600 hover:bg-orange-700 text-white rounded-md text-sm">ðŸ§  Claude</a>
+                  <a href="https://gemini.google.com/" target="_blank" rel="noopener" className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-sm">âœ¨ Gemini</a>
+                  <a href="https://grok.com/" target="_blank" rel="noopener" className="px-4 py-2.5 bg-slate-800 hover:bg-slate-900 text-white rounded-md text-sm">ð• Grok</a>
+                </div>
+                <details>
+                  <summary className="text-xs text-slate-500 cursor-pointer">ðŸ‘ï¸ Ver o dossiÃª completo (o que vai para a IA)</summary>
+                  <pre className="mt-2 bg-slate-900 text-slate-100 rounded p-3 text-[10px] max-h-96 overflow-auto whitespace-pre-wrap">
+                    {textoIA}
+                  </pre>
+                </details>
+              </div>
+
+              {/* BotÃ£o final */}
+              <div className="bg-emerald-50 border-2 border-emerald-400 rounded-lg p-5">
+                <h3 className="font-bold text-emerald-900 mb-2">âœ… PASSO 2 â€” ApÃ³s revisar com a IA, contabilize</h3>
+                <p className="text-sm text-emerald-800 mb-3">
+                  Quando a IA aprovar (ou vocÃª identificar que estÃ¡ OK), clique abaixo para gravar
+                  {" "}<b>{preValidacao.totais_filtrados.qtd_notas_validas} notas vÃ¡lidas Ãºnicas</b> no banco.
+                </p>
+                <div className="flex gap-2">
+                  <button
+                    onClick={contabilizarAgora}
+                    className="flex-1 px-5 py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-md font-bold text-sm"
+                  >
+                    âœ… CONTABILIZAR AGORA ({preValidacao.totais_filtrados.qtd_notas_validas} notas)
+                  </button>
+                  <button
+                    onClick={() => { setPreValidacao(null); setNfsParaContabilizar(null); setTextoIA(""); }}
+                    className="px-5 py-3 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 rounded-md font-medium text-sm"
+                  >
+                    âœ— Cancelar
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {progresso && (
+            <div className="mt-6 bg-white border border-indigo-200 rounded-lg p-4">
+              <div className="flex justify-between text-xs text-slate-600 mb-1">
+                <span>{progresso.fase}</span>
+                <span>{progresso.atual}/{progresso.total} Â· {Math.round((progresso.atual / progresso.total) * 100)}%</span>
+              </div>
+              <div className="w-full bg-slate-200 rounded-full h-3 overflow-hidden">
+                <div className="bg-indigo-600 h-full transition-all duration-300" style={{ width: `${(progresso.atual / progresso.total) * 100}%` }} />
+              </div>
+            </div>
+          )}
+
+          {erroGeral && (
+            <div className="mt-6 bg-red-50 border border-red-200 rounded-lg p-5">
+              <h3 className="font-semibold text-red-900 mb-2">âŒ Erro</h3>
+              <p className="text-sm text-red-800 font-mono whitespace-pre-wrap">{erroGeral}</p>
+              <div className="mt-4 text-xs text-red-700 space-y-1 border-t border-red-200 pt-3">
+                <p><b>DiagnÃ³stico:</b></p>
+                <p>â€¢ Se o erro persistir na Vercel, considere o <b>Plano B++</b> (Railway/Fly.io â€” sem limite de request/timeout). Veja <code className="bg-red-100 px-1">DEPLOY.md</code> no repositÃ³rio.</p>
+                <p>â€¢ Verifique tambÃ©m <a href="/setup" className="underline">/setup</a> para conferir se as tabelas existem no banco.</p>
+              </div>
+            </div>
+          )}
+
+          {resumo && !erroGeral && (
+            <div className="mt-6 bg-emerald-50 border border-emerald-200 rounded-lg p-5">
+              <h3 className="font-semibold text-emerald-900 mb-2">âœ… ContabilizaÃ§Ã£o concluÃ­da</h3>
+              <ul className="text-sm text-slate-700 space-y-1">
+                <li>ðŸ“„ Notas <b>ÃšNICAS AUTORIZADAS</b> processadas: <b>{resumo.processadas.toLocaleString("pt-BR")}</b></li>
+                {resumo.dedup_canceladas > 0 && (
+                  <li className="text-orange-700 bg-orange-50 px-2 py-1 rounded">
+                    ðŸš« <b>{resumo.dedup_canceladas.toLocaleString("pt-BR")}</b> NF-e canceladas/denegadas (cStat â‰  100/150) â€” EXCLUÃDAS do faturamento e da apuraÃ§Ã£o de impostos. Isso Ã© o comportamento correto conforme SEFAZ.
+                  </li>
+                )}
+                {(resumo.dedup_no_lote > 0 || resumo.dedup_no_banco > 0) && (
+                  <li className="text-amber-700 bg-amber-50 px-2 py-1 rounded">
+                    âš ï¸ <b>DeduplicaÃ§Ã£o:</b> de {resumo.dedup_recebidas.toLocaleString("pt-BR")} XMLs recebidos,
+                    {" "}<b>{resumo.dedup_no_lote.toLocaleString("pt-BR")}</b> duplicados no prÃ³prio lote
+                    {resumo.dedup_no_banco > 0 && <> e <b>{resumo.dedup_no_banco.toLocaleString("pt-BR")}</b> jÃ¡ existiam no banco</>}
+                    . Normal â€” pastas do SEFAZ trazem 2-3 XMLs por NF (autorizaÃ§Ã£o + eventos).
+                  </li>
+                )}
+                <li>ðŸ“ LanÃ§amentos totais: <b>{resumo.lancamentos.toLocaleString("pt-BR")}</b></li>
+                {resumo.tempoParseMs > 0 && (
+                  <li>ðŸ” Parse no navegador: <b>{resumo.tempoParseMs.toLocaleString("pt-BR")} ms</b> ({(resumo.tempoParseMs / Math.max(1, resumo.processadas)).toFixed(1)} ms/nota)</li>
+                )}
+                <li>ðŸ’¾ ContabilizaÃ§Ã£o no servidor: <b>{resumo.tempoMs.toLocaleString("pt-BR")} ms</b></li>
+                {regime === "SIMPLES" && resumo.rbt12 > 0 && (
+                  <li>ðŸ’° RBT12 {resumo.rbt12Estimado ? "estimado" : "informado"}: R$ {resumo.rbt12.toLocaleString("pt-BR")} â†’ alÃ­quota efetiva <b>{(resumo.aliqEfetiva * 100).toFixed(4)}%</b></li>
+                )}
+                <li>ðŸ” Auditoria R08: <b>{resumo.auditR08Erros}</b> erros Â· R$ {resumo.auditR08Credito.toLocaleString("pt-BR")} recuperÃ¡vel</li>
+                {resumo.parseErros.length > 0 && (
+                  <li>âš ï¸ {resumo.parseErros.length} XML(s) com erro de parse (ignorados)</li>
+                )}
+              </ul>
+              <div className="mt-4 flex flex-wrap gap-3">
+                <a href="/" className="text-sm bg-indigo-600 text-white px-4 py-2 rounded-md">Dashboard</a>
+                <a href="/analise-ia" className="text-sm bg-gradient-to-r from-purple-600 to-indigo-600 text-white px-4 py-2 rounded-md font-medium">ðŸ¤– Analisar com IA</a>
+                <a href="/api/exportar/pdf" className="text-sm bg-red-700 text-white px-4 py-2 rounded-md">ðŸ“„ PDF</a>
+                <a href="/api/exportar/excel" className="text-sm bg-emerald-600 text-white px-4 py-2 rounded-md">ðŸ“— Excel</a>
+                <a href="/api/exportar/word" className="text-sm bg-blue-700 text-white px-4 py-2 rounded-md">ðŸ“˜ Word</a>
+              </div>
+            </div>
+          )}
+        </main>
+      </div>
+    </div>
+  );
+}
