@@ -105,12 +105,27 @@ export async function POST(req: Request) {
       nfs,
     });
 
-    return NextResponse.json({
+    const res = NextResponse.json({
       ok: true,
       empresa: { cnpj: emp.cnpj, nome: emp.nome, regime: regimeEmpresa },
       processadas: nfs.length,
       result,
     });
+
+    // Marca a empresa que acabou de ser contabilizada como a "ativa" da
+    // sessão. Sem isso, depois de importar um cliente NOVO, o sistema
+    // continuava mostrando relatórios/análise de IA da empresa que estava
+    // ativa antes (normalmente a mais antiga cadastrada), mesmo com os
+    // dados corretos já gravados no banco para o cliente certo.
+    res.cookies.set("empresa_ativa_id", String(emp.id), {
+      httpOnly: true,
+      secure: true,
+      sameSite: "lax",
+      path: "/",
+      maxAge: 60 * 60 * 24 * 30,
+    });
+
+    return res;
   } catch (e) {
     console.error("upload-json error:", e);
     return NextResponse.json(
