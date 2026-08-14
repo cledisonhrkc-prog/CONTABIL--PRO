@@ -19,7 +19,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { NF } from "./nfe-parser";
 import { aliquotaEfetivaSimples, MONO_NCM } from "./simples";
 import { PLANO_CONTAS_PADRAO } from "./plano-contas";
-import { calcularImpostosNotaReforma, modoReformaParaData } from "./reforma";
+import { calcularImpostosNotaReforma, modoReformaParaData, buscarAliquotasVigentes } from "./reforma";
 
 export type Regime = "SIMPLES" | "LUCRO_PRESUMIDO" | "LUCRO_REAL";
 
@@ -133,6 +133,7 @@ export async function contabilizarLote(input: ContabilizarInput): Promise<Contab
     ? Math.min(0.95, Math.max(0.05, comprasReais / vendasReais))
     : (input.cmv_percent ?? 0.6);
   const cmv_percent = cmv_percent_calculado;
+  const aliquotasReforma = await buscarAliquotasVigentes();
   const recupera_ipi = !!input.recupera_ipi;
   const aliqMono = aliqCreditoMono[regime];
 
@@ -348,7 +349,7 @@ export async function contabilizarLote(input: ContabilizarInput): Promise<Contab
       });
 
       // Reforma Tributária
-      const reforma = calcularImpostosNotaReforma(nf.itens, dt);
+      const reforma = calcularImpostosNotaReforma(nf.itens, dt, aliquotasReforma);
       const modoRT = reforma.modo;
       const extinguePisCofins =
         modoRT === "REFORMA_2027" || modoRT === "REFORMA_2029" || modoRT === "REFORMA_2033";
@@ -944,4 +945,5 @@ export async function recalcularCmvReal(empresaId: number): Promise<{
     notas_ajustadas: ajuste.rows.length,
   };
 }
+
 
