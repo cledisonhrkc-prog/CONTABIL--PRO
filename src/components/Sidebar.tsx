@@ -1,6 +1,8 @@
 "use client";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
+
 const menu: Array<{ label: string; href: string; icon: string; group?: string }> = [
   { label: "Dashboard", href: "/", icon: "🏠" },
   { label: "Empresa", href: "/empresa", icon: "🏢" },
@@ -23,8 +25,40 @@ const menu: Array<{ label: string; href: string; icon: string; group?: string }>
   { label: "SPED / Exportar", href: "/exportar", icon: "💾" },
   { label: "Configurações", href: "/configuracoes", icon: "⚙️" },
 ];
+
+type Empresa = { id: number; nome: string; cnpj: string };
+
 export default function Sidebar() {
   const path = usePathname();
+  const router = useRouter();
+  const [empresasDisp, setEmpresasDisp] = useState<Empresa[]>([]);
+  const [empresaAtual, setEmpresaAtual] = useState<string>("");
+
+  useEffect(() => {
+    fetch("/api/minhas-empresas")
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.ok) setEmpresasDisp(data.empresas ?? []);
+      })
+      .catch(() => {});
+  }, []);
+
+  async function trocarEmpresa(id: string) {
+    if (!id) return;
+    setEmpresaAtual(id);
+    await fetch("/api/selecionar-empresa", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ empresa_id: Number(id) }),
+    });
+    router.refresh();
+  }
+
+  async function sair() {
+    await fetch("/api/auth/logout", { method: "POST" });
+    router.push("/login");
+  }
+
   return (
     <aside className="w-64 bg-white border-r border-slate-200 flex flex-col h-screen sticky top-0">
       <div className="px-5 py-4 border-b border-slate-200">
@@ -38,6 +72,27 @@ export default function Sidebar() {
           </div>
         </div>
       </div>
+
+      {empresasDisp.length > 0 && (
+        <div className="px-3 py-2 border-b border-slate-200">
+          <label className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold block mb-1">
+            Cliente
+          </label>
+          <select
+            className="w-full text-xs border border-slate-300 rounded px-2 py-1.5"
+            value={empresaAtual}
+            onChange={(e) => trocarEmpresa(e.target.value)}
+          >
+            <option value="">Selecionar empresa...</option>
+            {empresasDisp.map((e) => (
+              <option key={e.id} value={e.id}>
+                {e.nome}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+
       <nav className="flex-1 overflow-y-auto px-2 py-3">
         <div className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold px-3 mb-2">
           Menu Principal
@@ -60,6 +115,7 @@ export default function Sidebar() {
           );
         })}
       </nav>
+
       <div className="border-t border-slate-200 px-4 py-3 text-xs">
         <div className="text-slate-500">Exercício Contábil</div>
         <div className="font-bold text-slate-800">{new Date().getFullYear()}</div>
@@ -68,6 +124,15 @@ export default function Sidebar() {
           <span className="text-emerald-600 font-medium text-[11px]">Período Aberto</span>
         </div>
       </div>
+
+      <button
+        onClick={sair}
+        className="border-t border-slate-200 px-4 py-3 text-xs text-red-600 hover:bg-red-50 text-left flex items-center gap-2"
+      >
+        <span>🚪</span>
+        <span>Sair</span>
+      </button>
+
       <div className="border-t border-slate-200 px-4 py-3 text-[10px] text-slate-400">
         v5.0.0 — SIGC
       </div>
