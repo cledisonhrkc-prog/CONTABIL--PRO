@@ -527,10 +527,39 @@ export async function contabilizarLote(input: ContabilizarInput): Promise<Contab
   // IRPJ/CSLL (Presumido/Real)
   if (regime !== "SIMPLES") {
     for (const ano of Array.from(anos)) {
-      const lucro = await lucroContabil(input.empresa_id, ano);
-      if (lucro > 0) {
-        const irpj = round(lucro * 0.15 + Math.max(lucro - 240000, 0) * 0.10);
-        const csll = round(lucro * 0.09);
+      let irpj = 0;
+      let csll = 0;
+      if (regime === "LUCRO_PRESUMIDO") {
+        // Presumido: base de calculo eh PRESUMIDA sobre a receita bruta do
+        // periodo (nao sobre o lucro contabil apurado) -- percentuais fixos
+        // por atividade (IN RFB 1700/2017, art. 33): comercio 8% (IRPJ) / 12%
+        // (CSLL); servicos 32%/32%. Generico para qualquer empresa: usa so a
+        // classificacao VENDA/SERVICO que o parser ja atribui a cada nota.
+        const ini = `${ano}-01-01`;
+        const fim = `${ano}-12-31`;
+        const rq = await db.execute<{ venda: string; servico: string }>(sql`
+          SELECT
+            COALESCE(SUM(CASE WHEN finalidade = 'VENDA' THEN valor_total ELSE 0 END),0)::text AS venda,
+            COALESCE(SUM(CASE WHEN finalidade = 'SERVICO' THEN valor_total ELSE 0 END),0)::text AS servico
+          FROM notas_fiscais
+          WHERE empresa_id = ${input.empresa_id}
+            AND tipo_operacao = 'SAIDA'
+            AND data_emissao >= ${ini}
+            AND data_emissao <= ${fim}
+        `);
+        const venda = round(Number(rq.rows[0]?.venda ?? 0));
+        const servico = round(Number(rq.rows[0]?.servico ?? 0));
+        const baseIrpj = round(venda * 0.08 + servico * 0.32);
+        const baseCsll = round(venda * 0.12 + servico * 0.32);
+        irpj = round(baseIrpj * 0.15 + Math.max(baseIrpj - 240000, 0) * 0.10);
+        csll = round(baseCsll * 0.09);
+      } else {
+        // LUCRO_REAL: IRPJ/CSLL incidem de fato sobre o lucro contabil apurado.
+        const lucro = await lucroContabil(input.empresa_id, ano);
+        irpj = round(lucro * 0.15 + Math.max(lucro - 240000, 0) * 0.10);
+        csll = round(lucro * 0.09);
+      }
+      if (irpj > 0 || csll > 0) {
         const di = `${ano}-12-31`;
         await inserirLancamentoUnico(input.empresa_id, {
           data: di, competencia: di, historico: `Provisão IRPJ ${ano}`,
