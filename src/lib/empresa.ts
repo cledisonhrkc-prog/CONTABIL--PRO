@@ -14,57 +14,80 @@ export async function ensureUsuarioEmpresasTable() {
   `);
 }
 
-async function usuarioLogadoId(): Promise<number | null> {
+export type UsuarioAtual = { id: number; email: string; admin: boolean };
+
+/**
+ * Lê a sessão (cookie) e retorna o usuário logado com seu status de admin.
+ * Retorna null se não houver sessão válida.
+ */
+export async function usuarioAtual(): Promise<UsuarioAtual | null> {
   const cookieStore = await cookies();
   const token = cookieStore.get("sessao")?.value;
   const sessao = verificarTokenSessao(token);
   if (!sessao) return null;
 
-  const r = await db.execute<{ id: number }>(sql`
-    SELECT id FROM usuarios WHERE email = ${sessao.email}
+  const r = await db.execute<{ id: number; admin: boolean }>(sql`
+    SELECT id, admin FROM usuarios WHERE email = ${sessao.email}
   `);
-  return r.rows[0]?.id ?? null;
+  const u = r.rows[0];
+  if (!u) return null;
+  return { id: u.id, email: sessao.email, admin: !!u.admin };
+}
+
+/**
+ * Retorna os IDs de empresa que o usuário pode acessar.
+ * - Admin: retorna null, que significa "todas" (verificação dinâmica,
+ *   não depende de vínculo manual — funciona mesmo para empresas
+ *   cadastradas depois que o admin foi promovido).
+ * - Não-admin: retorna o array de IDs vinculados em usuario_empresas.
+ *   Pode ser um array VAZIO, o que significa "nenhuma empresa liberada
+ *   ainda" — é preciso um admin vincular explicitamente antes dele
+ *   conseguir usar o sistema.
+ */
+export async function empresasPermitidasIds(usuario: UsuarioAtual): Promise<number[] | null> {
+  if (usuario.admin) return null;
+
+  await ensureUsuarioEmpresasTable();
+  const r = await db.execute<{ empresa_id: number }>(sql`
+    SELECT empresa_id FROM usuario_empresas WHERE usuario_id = ${usuario.id}
+  `);
+  return r.rows.map((row) => row.empresa_id);
 }
 
 /**
  * Retorna a empresa "ativa" para o usuário logado:
- * 1. Se ele escolheu uma empresa (cookie empresa_ativa_id) e tem permissão nela, usa essa.
- * 2. Senão, usa a primeira empresa que ele tem permissão de ver.
- * 3. Se o usuário ainda não tem NENHUM vínculo cadastrado em usuario_empresas
- *    (comportamento provisório, até alguém vincular usuários a empresas),
- *    cai no comportamento antigo: primeira empresa cadastrada no sistema.
- *    Isso evita qualquer regressão para quem já estava usando o sistema
- *    antes de existir controle de acesso por empresa.
+ * 1. Sem sessão de login: null.
+ * 2. Admin: pode escolher qualquer empresa cadastrada no sistema.
+ * 3. Não-admin: só pode escolher entre as empresas vinculadas a ele.
+ *    Se não tiver NENHUMA vinculada, não vê nenhuma empresa (null) —
+ *    precisa de um admin vincular antes de conseguir usar o sistema.
  */
 export async function getEmpresaAtiva() {
   try {
-    await ensureUsuarioEmpresasTable();
+    const usuario = await usuarioAtual();
+    if (!usuario) return null;
 
-    const usuarioId = await usuarioLogadoId();
-
-    let empresasPermitidas: number[] = [];
-    if (usuarioId) {
-      const r = await db.execute<{ empresa_id: number }>(sql`
-        SELECT empresa_id FROM usuario_empresas WHERE usuario_id = ${usuarioId}
-      `);
-      empresasPermitidas = r.rows.map((row) => row.empresa_id);
-    }
-
-    // Nenhum vínculo configurado ainda para este usuário: comportamento
-    // provisório de compatibilidade — mostra a primeira empresa do sistema.
-    if (empresasPermitidas.length === 0) {
-      const rows = await db.select().from(empresas).limit(1);
-      return rows[0] ?? null;
-    }
+    const permitidos = await empresasPermitidasIds(usuario);
 
     const cookieStore = await cookies();
     const escolhidaStr = cookieStore.get("empresa_ativa_id")?.value;
     const escolhidaId = escolhidaStr ? Number(escolhidaStr) : null;
 
+    // Admin: pode escolher qualquer empresa existente.
+    if (permitidos === null) {
+      if (escolhidaId) {
+        const rows = await db.select().from(empresas).where(eq(empresas.id, escolhidaId)).limit(1);
+        if (rows[0]) return rows[0];
+      }
+      const rows = await db.select().from(empresas).limit(1);
+      return rows[0] ?? null;
+    }
+
+    // Não-admin sem nenhuma empresa vinculada: sem acesso.
+    if (permitidos.length === 0) return null;
+
     const idFinal =
-      escolhidaId && empresasPermitidas.includes(escolhidaId)
-        ? escolhidaId
-        : empresasPermitidas[0];
+      escolhidaId && permitidos.includes(escolhidaId) ? escolhidaId : permitidos[0];
 
     const rows = await db.select().from(empresas).where(eq(empresas.id, idFinal)).limit(1);
     return rows[0] ?? null;
