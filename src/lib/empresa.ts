@@ -41,8 +41,8 @@ export async function usuarioAtual(): Promise<UsuarioAtual | null> {
  *   cadastradas depois que o admin foi promovido).
  * - Não-admin: retorna o array de IDs vinculados em usuario_empresas.
  *   Pode ser um array VAZIO, o que significa "nenhuma empresa liberada
- *   ainda" — é preciso um admin vincular explicitamente antes dele
- *   conseguir usar o sistema.
+ *   ainda" — é preciso um admin (ou o próprio ato de importar um
+ *   cliente novo, ver vincularUsuarioEmpresa) para liberar acesso.
  */
 export async function empresasPermitidasIds(usuario: UsuarioAtual): Promise<number[] | null> {
   if (usuario.admin) return null;
@@ -94,6 +94,34 @@ export async function getEmpresaAtiva() {
   } catch {
     return null;
   }
+}
+
+/**
+ * Busca uma empresa pelo CNPJ SEM checar permissão do usuário.
+ * Uso restrito: serve só para descobrir se um CNPJ já está cadastrado
+ * no sistema (por exemplo, na hora de importar XML), antes de decidir
+ * se cria uma empresa nova ou bloqueia por falta de permissão. NUNCA
+ * usar o resultado desta função para exibir dados sem antes confirmar
+ * que o usuário tem permissão nela.
+ */
+export async function buscarEmpresaPorCnpjSemFiltro(cnpjLimpo: string) {
+  const rows = await db.select().from(empresas).where(eq(empresas.cnpj, cnpjLimpo)).limit(1);
+  return rows[0] ?? null;
+}
+
+/**
+ * Vincula um usuário a uma empresa (idempotente — não duplica se já
+ * existir o vínculo). Usado, por exemplo, quando um usuário comum
+ * (não-admin) importa os XMLs de um cliente novo: ele automaticamente
+ * ganha acesso ao cliente que acabou de trazer para o sistema.
+ */
+export async function vincularUsuarioEmpresa(usuarioId: number, empresaId: number) {
+  await ensureUsuarioEmpresasTable();
+  await db.execute(sql`
+    INSERT INTO usuario_empresas (usuario_id, empresa_id)
+    VALUES (${usuarioId}, ${empresaId})
+    ON CONFLICT DO NOTHING
+  `);
 }
 
 export async function garantirEmpresa(dados: {
