@@ -196,6 +196,21 @@ export function parseNfeXml(xml: string, cnpjEmpresa: string): NF {
   const cStatRaw = nfeProc?.protNFe?.infProt?.cStat;
   const cStat = cStatRaw != null ? String(cStatRaw) : "100"; // default = autorizada
 
+  // ===== VALIDAÇÃO ESTRUTURAL (não é validação XSD oficial da SEFAZ) =====
+  const errosEstruturais: string[] = [];
+  if (!/^\d{44}$/.test(chave)) {
+    errosEstruturais.push(`chave de acesso inválida (esperado 44 dígitos, recebido: "${chave || "vazia"}")`);
+  }
+  if (!cnpjEmit) {
+    errosEstruturais.push("bloco emitente (emit) ausente ou sem CNPJ/CPF");
+  }
+  if (!totalObj || Object.keys(totalObj).length === 0) {
+    errosEstruturais.push("bloco de totais (total/ICMSTot) ausente");
+  }
+  if (errosEstruturais.length > 0) {
+    throw new Error(`XML estruturalmente inválido: ${errosEstruturais.join("; ")}`);
+  }
+
   return {
     chave: chave || `${nNF}|${serie}|${v_nf}`,
     numero: nNF,
