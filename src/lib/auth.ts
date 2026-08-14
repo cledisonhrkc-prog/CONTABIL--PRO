@@ -20,8 +20,14 @@ export async function ensureUsuariosTable() {
       senha_hash TEXT NOT NULL,
       nome TEXT,
       ativo BOOLEAN NOT NULL DEFAULT true,
+      admin BOOLEAN NOT NULL DEFAULT false,
       created_at TIMESTAMP DEFAULT NOW()
     )
+  `);
+  // Garante a coluna "admin" mesmo em bancos que já tinham a tabela
+  // criada antes dela existir (ambiente já estava em produção).
+  await db.execute(sql`
+    ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS admin BOOLEAN NOT NULL DEFAULT false
   `);
 }
 
@@ -64,4 +70,17 @@ export function verificarTokenSessao(token: string | undefined | null): { email:
   } catch {
     return null;
   }
+}
+
+/**
+ * Retorna true se o email pertence a um usuário admin ativo.
+ * Usado para proteger rotas administrativas (ex: gerenciar usuários).
+ */
+export async function ehAdmin(email: string): Promise<boolean> {
+  await ensureUsuariosTable();
+  const r = await db.execute<{ admin: boolean; ativo: boolean }>(sql`
+    SELECT admin, ativo FROM usuarios WHERE email = ${email}
+  `);
+  const u = r.rows[0];
+  return !!u && u.ativo && u.admin;
 }

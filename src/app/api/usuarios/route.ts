@@ -2,25 +2,38 @@ import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { db } from "@/db";
 import { sql } from "drizzle-orm";
-import { hashSenha, ensureUsuariosTable, verificarTokenSessao } from "@/lib/auth";
+import { hashSenha, ensureUsuariosTable, verificarTokenSessao, ehAdmin } from "@/lib/auth";
 import { ensureUsuarioEmpresasTable } from "@/lib/empresa";
 
-async function exigirLogin() {
+async function exigirAdmin() {
   const cookieStore = await cookies();
   const token = cookieStore.get("sessao")?.value;
-  return verificarTokenSessao(token);
+  const sessao = verificarTokenSessao(token);
+  if (!sessao) return null;
+  const admin = await ehAdmin(sessao.email);
+  if (!admin) return null;
+  return sessao;
 }
 
 export async function GET() {
-  const sessao = await exigirLogin();
+  const sessao = await exigirAdmin();
   if (!sessao) {
-    return NextResponse.json({ ok: false, mensagem: "Não autenticado." }, { status: 401 });
+    return NextResponse.json(
+      { ok: false, mensagem: "Apenas administradores podem acessar." },
+      { status: 403 }
+    );
   }
   await ensureUsuariosTable();
   await ensureUsuarioEmpresasTable();
 
-  const r = await db.execute<{ id: number; email: string; nome: string | null; ativo: boolean }>(sql`
-    SELECT id, email, nome, ativo FROM usuarios ORDER BY id
+  const r = await db.execute<{
+    id: number;
+    email: string;
+    nome: string | null;
+    ativo: boolean;
+    admin: boolean;
+  }>(sql`
+    SELECT id, email, nome, ativo, admin FROM usuarios ORDER BY id
   `);
 
   const usuariosComEmpresas = [];
@@ -35,9 +48,12 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const sessao = await exigirLogin();
+  const sessao = await exigirAdmin();
   if (!sessao) {
-    return NextResponse.json({ ok: false, mensagem: "Não autenticado." }, { status: 401 });
+    return NextResponse.json(
+      { ok: false, mensagem: "Apenas administradores podem criar usuários." },
+      { status: 403 }
+    );
   }
   await ensureUsuariosTable();
   await ensureUsuarioEmpresasTable();
@@ -61,8 +77,8 @@ export async function POST(req: NextRequest) {
   const hash = hashSenha(senha);
 
   const inserido = await db.execute<{ id: number }>(sql`
-    INSERT INTO usuarios (email, senha_hash, nome, ativo)
-    VALUES (${emailNormalizado}, ${hash}, ${nome ?? null}, true)
+    INSERT INTO usuarios (email, senha_hash, nome, ativo, admin)
+    VALUES (${emailNormalizado}, ${hash}, ${nome ?? null}, true, false)
     ON CONFLICT (email) DO NOTHING
     RETURNING id
   `);
@@ -88,9 +104,12 @@ export async function POST(req: NextRequest) {
 }
 
 export async function PATCH(req: NextRequest) {
-  const sessao = await exigirLogin();
+  const sessao = await exigirAdmin();
   if (!sessao) {
-    return NextResponse.json({ ok: false, mensagem: "Não autenticado." }, { status: 401 });
+    return NextResponse.json(
+      { ok: false, mensagem: "Apenas administradores podem alterar usuários." },
+      { status: 403 }
+    );
   }
   await ensureUsuariosTable();
 
