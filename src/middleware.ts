@@ -4,7 +4,13 @@ import { verificarTokenSessao } from "@/lib/auth";
 // Roda em runtime Node (não Edge) para poder usar módulos nativos com segurança.
 export const runtime = "nodejs";
 
-const ROTAS_PUBLICAS = ["/login", "/api/auth/login", "/api/auth/criar-usuario", "/api/health"];
+const ROTAS_PUBLICAS = [
+  "/login",
+  "/api/auth/login",
+  "/api/auth/criar-usuario",
+  "/api/auth/trocar-credenciais",
+  "/api/health",
+];
 
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
