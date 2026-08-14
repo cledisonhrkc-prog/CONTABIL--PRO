@@ -86,3 +86,28 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json({ ok: true, mensagem: "Usuário criado.", id: novoId });
 }
+
+export async function PATCH(req: NextRequest) {
+  const sessao = await exigirLogin();
+  if (!sessao) {
+    return NextResponse.json({ ok: false, mensagem: "Não autenticado." }, { status: 401 });
+  }
+  await ensureUsuariosTable();
+
+  const { id, ativo } = await req.json();
+  if (!id || typeof ativo !== "boolean") {
+    return NextResponse.json(
+      { ok: false, mensagem: "id e ativo são obrigatórios." },
+      { status: 400 }
+    );
+  }
+
+  await db.execute(sql`
+    UPDATE usuarios SET ativo = ${ativo} WHERE id = ${id}
+  `);
+
+  return NextResponse.json({
+    ok: true,
+    mensagem: ativo ? "Usuário desbloqueado." : "Usuário bloqueado.",
+  });
+}

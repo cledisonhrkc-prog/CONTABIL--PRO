@@ -23,6 +23,7 @@ const menu: Array<{ label: string; href: string; icon: string; group?: string }>
   { label: "Analisar com IA", href: "/analise-ia", icon: "🤖" },
   { label: "Relatórios", href: "/relatorios", icon: "📑" },
   { label: "SPED / Exportar", href: "/exportar", icon: "💾" },
+  { label: "Gerenciar Usuários", href: "/usuarios", icon: "👥" },
   { label: "Configurações", href: "/configuracoes", icon: "⚙️" },
 ];
 
