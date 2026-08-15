@@ -29,6 +29,24 @@ type Body = {
   nfs: NF[];
 };
 
+// Deriva o segmento (Comércio/Indústria/Serviços) a partir do Anexo do
+// Simples escolhido — antes ficava sempre fixo em "COMERCIO", não
+// importa qual Anexo fosse selecionado na tela.
+function segmentoDoAnexo(anexo: string): string {
+  switch (anexo) {
+    case "I":
+      return "COMERCIO";
+    case "II":
+      return "INDUSTRIA";
+    case "III":
+    case "IV":
+    case "V":
+      return "SERVICOS";
+    default:
+      return "COMERCIO";
+  }
+}
+
 export async function POST(req: Request) {
   try {
     const usuario = await usuarioAtual();
@@ -76,7 +94,13 @@ export async function POST(req: Request) {
         // vinculado a esse cliente, sem precisar de um admin pra liberar.
         const nome = body.nome || "EMPRESA (nome nao identificado no XML)";
         const regime = body.regime || crtParaRegime(body.crt ?? null);
-        emp = await garantirEmpresa({ cnpj, nome, regime, anexo_simples: anexo });
+        emp = await garantirEmpresa({
+          cnpj,
+          nome,
+          regime,
+          anexo_simples: anexo,
+          segmento: segmentoDoAnexo(anexo),
+        });
         if (!usuario.admin) {
           await vincularUsuarioEmpresa(usuario.id, emp.id);
         }
