@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useState } from "react";
 import Sidebar from "@/components/Sidebar";
@@ -47,6 +47,7 @@ export default function ImportarPage() {
   const [nfsParaContabilizar, setNfsParaContabilizar] = useState<NF[] | null>(null);
   const [copiado, setCopiado] = useState(false);
   const [analiseClaude, setAnaliseClaude] = useState<string | null>(null);
+  const [analiseDeepseek, setAnaliseDeepseek] = useState<string | null>(null);
   const [loadingClaude, setLoadingClaude] = useState(false);
 
   // Totalmente automático: detecta o CNPJ pelo lote de XMLs e, em seguida,
@@ -229,6 +230,7 @@ export default function ImportarPage() {
       const rIA = await fetch("/api/analise-ia?analisar=1");
       const dataIA = await rIA.json();
       setAnaliseClaude(dataIA.analise_claude ?? "Sem retorno da IA.");
+      setAnaliseDeepseek(dataIA.analise_deepseek ?? null);
     } catch (eIA) {
       setAnaliseClaude("Erro ao chamar a IA: " + String(eIA));
     }
@@ -628,6 +630,17 @@ export default function ImportarPage() {
             </div>
           )}
 
+          {(loadingClaude || analiseDeepseek) && (
+            <div className="mt-6 bg-white border-2 border-blue-300 rounded-lg p-5">
+              <h3 className="font-bold text-blue-900 mb-2">Parecer da IA (DeepSeek)</h3>
+              {loadingClaude ? (
+                <p className="text-sm text-slate-600">Analisando com a IA, aguarde...</p>
+              ) : (
+                <pre className="text-xs text-slate-800 whitespace-pre-wrap max-h-96 overflow-auto">{analiseDeepseek}</pre>
+              )}
+            </div>
+          )}
+
           {progresso && (
             <div className="mt-6 bg-white border border-indigo-200 rounded-lg p-4">
               <div className="flex justify-between text-xs text-slate-600 mb-1">
@@ -689,3 +702,4 @@ export default function ImportarPage() {
     </div>
   );
 }
+
