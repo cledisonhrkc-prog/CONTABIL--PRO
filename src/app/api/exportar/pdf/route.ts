@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+﻿import { NextResponse } from "next/server";
 import PDFDocument from "pdfkit";
 import { getEmpresaAtiva } from "@/lib/empresa";
 import {
@@ -227,17 +227,25 @@ export async function GET() {
   const apFmt = apRows.map((r) => [`${r.periodo} · ${r.imposto}`, fmtMoeda(r.debito), fmtMoeda(r.credito), fmtMoeda(r.a_pagar)]);
   if (apFmt.length === 0) apFmt.push(["Sem apuração", "-", "-", "-"]);
   tabela(doc, ["Período / Imposto", "Débito", "Crédito", "A Pagar"], apFmt, [W * 0.4, W * 0.2, W * 0.2, W * 0.2], addPage, drawFooter);
-  doc.fillColor(C.gold).font("Helvetica-Bold").fontSize(10)
-    .text(`DAS ESTIMADO: ${fmtMoeda(totalApagar)}`, 40, doc.y, { width: W, align: "right", lineBreak: false });
-  doc.y += 12;
-  doc.fillColor(C.gray).font("Helvetica-Oblique").fontSize(6.5).text("Valor estimado pelo sistema com base no faturamento do periodo. O DAS oficial e apurado no PGDAS-D pela contabilidade responsavel.", 40, doc.y, { width: W, align: "right" });
-  doc.y += 16;
-  doc.roundedRect(40, doc.y, W, 54, 3).fillAndStroke(C.bg, C.gold);
-  const yBox = doc.y;
-  doc.fillColor(C.navy).font("Helvetica-Bold").fontSize(8.5).text("COMO LER O DAS DESTE RELATORIO", 50, yBox + 6, { width: W - 20 });
-  doc.fillColor(C.slate).font("Helvetica").fontSize(7.5).text("O valor do DAS aqui e uma ESTIMATIVA tecnica, calculada pela formula oficial do Simples Nacional (LC 123/2006) sobre o faturamento do periodo. O valor DEFINITIVO a recolher e o que consta no PGDAS-D, gerado mensalmente pela contabilidade junto a Receita Federal, pois depende da receita acumulada dos ultimos 12 meses (RBT12). Pequenas diferencas entre esta estimativa e o PGDAS-D sao normais e esperadas.", 50, yBox + 18, { width: W - 20, align: "justify" });
-  doc.y = yBox + 60;
-  doc.y += 14;
+  if (emp.regime === "SIMPLES") {
+    doc.fillColor(C.gold).font("Helvetica-Bold").fontSize(10)
+      .text(`DAS ESTIMADO: ${fmtMoeda(totalApagar)}`, 40, doc.y, { width: W, align: "right", lineBreak: false });
+    doc.y += 12;
+    doc.fillColor(C.gray).font("Helvetica-Oblique").fontSize(6.5).text("Valor estimado pelo sistema com base no faturamento do periodo. O DAS oficial e apurado no PGDAS-D pela contabilidade responsavel.", 40, doc.y, { width: W, align: "right" });
+    doc.y += 16;
+    doc.roundedRect(40, doc.y, W, 54, 3).fillAndStroke(C.bg, C.gold);
+    const yBox = doc.y;
+    doc.fillColor(C.navy).font("Helvetica-Bold").fontSize(8.5).text("COMO LER O DAS DESTE RELATORIO", 50, yBox + 6, { width: W - 20 });
+    doc.fillColor(C.slate).font("Helvetica").fontSize(7.5).text("O valor do DAS aqui e uma ESTIMATIVA tecnica, calculada pela formula oficial do Simples Nacional (LC 123/2006) sobre o faturamento do periodo. O valor DEFINITIVO a recolher e o que consta no PGDAS-D, gerado mensalmente pela contabilidade junto a Receita Federal, pois depende da receita acumulada dos ultimos 12 meses (RBT12). Pequenas diferencas entre esta estimativa e o PGDAS-D sao normais e esperadas.", 50, yBox + 18, { width: W - 20, align: "justify" });
+    doc.y = yBox + 60;
+    doc.y += 14;
+  } else {
+    doc.fillColor(C.gold).font("Helvetica-Bold").fontSize(10)
+      .text(`IMPOSTOS APURADOS: ${fmtMoeda(totalApagar)}`, 40, doc.y, { width: W, align: "right", lineBreak: false });
+    doc.y += 12;
+    doc.fillColor(C.gray).font("Helvetica-Oblique").fontSize(6.5).text("Valores de IRPJ, CSLL, PIS, COFINS e demais tributos apurados conforme o regime tributario desta empresa. Sujeitos a conferencia da contabilidade responsavel.", 40, doc.y, { width: W, align: "right" });
+    doc.y += 16;
+  }
 
   // BALANCETE
   secao("3. BALANCETE DE VERIFICAÇÃO");
@@ -341,3 +349,4 @@ export async function GET() {
     },
   });
 }
+
