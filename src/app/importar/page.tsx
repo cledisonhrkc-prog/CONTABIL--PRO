@@ -116,6 +116,16 @@ export default function ImportarPage() {
 
             setDetectadoAutomaticamente(true);
 
+      if (!usouCadastroExistente) {
+        const pPISVals = textos.flatMap((t) => Array.from(t.matchAll(/<pPIS>([\d.]+)<\/pPIS>/g)).map((m) => parseFloat(m[1])));
+        const pCOFINSVals = textos.flatMap((t) => Array.from(t.matchAll(/<pCOFINS>([\d.]+)<\/pCOFINS>/g)).map((m) => parseFloat(m[1])));
+        const temAssinaturaLucroReal = pPISVals.some((v) => Math.abs(v - 1.65) < 0.01) && pCOFINSVals.some((v) => Math.abs(v - 7.6) < 0.01);
+        if (temAssinaturaLucroReal && detectada.crt !== "1" && detectada.crt !== "2") {
+          setRegime("LUCRO_REAL");
+          setSugestaoAnexo("Sugestao automatica: PIS 1,65% e COFINS 7,60% detectados (regime nao-cumulativo). A lei proibe esse regime para Lucro Presumido (Lei 10.637/2002 e Lei 10.833/2003) - Lucro Real foi pre-selecionado. Confirme antes de contabilizar.");
+        }
+      }
+
       try {
         const cfopsEncontrados = Array.from(new Set(textos.flatMap((t) => Array.from(t.matchAll(/<CFOP>(\d+)<\/CFOP>/g)).map((m) => m[1]))));
         if (cfopsEncontrados.length > 0) {
@@ -727,6 +737,7 @@ export default function ImportarPage() {
     </div>
   );
 }
+
 
 
 
