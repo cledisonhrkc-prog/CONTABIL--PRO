@@ -48,6 +48,7 @@ export default function ImportarPage() {
   const [copiado, setCopiado] = useState(false);
   const [analiseClaude, setAnaliseClaude] = useState<string | null>(null);
   const [analiseDeepseek, setAnaliseDeepseek] = useState<string | null>(null);
+  const [sugestaoAnexo, setSugestaoAnexo] = useState<string | null>(null);
   const [loadingClaude, setLoadingClaude] = useState(false);
 
   // Totalmente automático: detecta o CNPJ pelo lote de XMLs e, em seguida,
@@ -113,7 +114,21 @@ export default function ImportarPage() {
         }
       }
 
-      setDetectadoAutomaticamente(true);
+            setDetectadoAutomaticamente(true);
+
+      try {
+        const cfopsEncontrados = Array.from(new Set(textos.flatMap((t) => Array.from(t.matchAll(/<CFOP>(\d+)<\/CFOP>/g)).map((m) => m[1]))));
+        if (cfopsEncontrados.length > 0 && !usouCadastroExistente) {
+          const respAnexo = await fetch("/api/detectar-anexo", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ cfops: cfopsEncontrados, cnae: null })
+          });
+          const dadosAnexo = await respAnexo.json();
+          if (dadosAnexo.anexo === "I" || dadosAnexo.anexo === "II") setAnexo(dadosAnexo.anexo);
+          if (dadosAnexo.mensagem) setSugestaoAnexo(dadosAnexo.mensagem);
+        }
+      } catch {}
     } catch (err) {
       setErroGeral("Erro ao detectar empresa automaticamente: " + (err as Error).message);
     }
@@ -702,4 +717,5 @@ export default function ImportarPage() {
     </div>
   );
 }
+
 
