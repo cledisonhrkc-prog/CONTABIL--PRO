@@ -15,6 +15,9 @@ export type ResultadoClassificacao = {
   mensagem: string;
 };
 
+const AVISO_CPP_ANEXO_IV =
+  "IMPORTANTE: no Anexo IV, a CPP (Contribuição Previdenciária Patronal, ~20% da folha de pagamento) NÃO está incluída no DAS — precisa ser recolhida separadamente, todo mês, em guia própria (GPS). O DAS deste Anexo é mais baixo justamente por isso.";
+
 /**
  * Classifica o Anexo do Simples Nacional a partir do CFOP das notas e,
  * quando o CFOP for de serviço (genérico, não diferencia III/IV/V), do
@@ -31,6 +34,10 @@ export type ResultadoClassificacao = {
  *      pagamento ÷ receita 12 meses), que este sistema NÃO calcula hoje
  *      (não temos dado de folha de pagamento) — precisa confirmação humana.
  *    - Se não achar o CNAE na tabela → indeterminado, mantém escolha manual.
+ *
+ * Anexo IV: recebe aviso adicional sobre a CPP patronal ficar de fora do
+ * DAS (precisa ser recolhida separadamente) — regra oficial do Simples
+ * Nacional (LC 123/2006), confirmada em fontes de 2026.
  */
 export async function classificarAnexo(
   cfops: string[],
@@ -107,13 +114,16 @@ export async function classificarAnexo(
       };
     }
 
+    const mensagemBase = `Detectado via CNAE ${cnaeLimpo} (${row.descricao}): Anexo ${anexoDetectado}.`;
+
     return {
       anexo: anexoDetectado,
       fonte: "cnae",
       precisaFatorR: false,
       cnaeEncontrado: cnaeLimpo,
       descricaoCnae: row.descricao,
-      mensagem: `Detectado via CNAE ${cnaeLimpo} (${row.descricao}): Anexo ${anexoDetectado}.`,
+      mensagem:
+        anexoDetectado === "IV" ? `${mensagemBase} ${AVISO_CPP_ANEXO_IV}` : mensagemBase,
     };
   } catch {
     return {
