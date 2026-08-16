@@ -118,17 +118,27 @@ export default function ImportarPage() {
 
       try {
         const cfopsEncontrados = Array.from(new Set(textos.flatMap((t) => Array.from(t.matchAll(/<CFOP>(\d+)<\/CFOP>/g)).map((m) => m[1]))));
-        if (cfopsEncontrados.length > 0 && !usouCadastroExistente) {
+        if (cfopsEncontrados.length > 0) {
           const respAnexo = await fetch("/api/detectar-anexo", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ cfops: cfopsEncontrados, cnae: null })
+            body: JSON.stringify({ cfops: cfopsEncontrados, cnae: null }),
           });
           const dadosAnexo = await respAnexo.json();
-          if (dadosAnexo.anexo === "I" || dadosAnexo.anexo === "II") setAnexo(dadosAnexo.anexo);
-          if (dadosAnexo.mensagem) setSugestaoAnexo(dadosAnexo.mensagem);
+          if (!usouCadastroExistente) {
+            if (["I", "II", "III", "IV", "V"].includes(dadosAnexo.anexo)) {
+              setAnexo(dadosAnexo.anexo);
+            }
+            if (dadosAnexo.mensagem) setSugestaoAnexo(dadosAnexo.mensagem);
+          } else {
+            if (dadosAnexo.anexo && dadosAnexo.anexo !== anexo) {
+              setSugestaoAnexo("Sugestao automatica: Anexo " + dadosAnexo.anexo + (dadosAnexo.mensagem ? " - " + dadosAnexo.mensagem : ""));
+            }
+          }
         }
-      } catch {}
+      } catch (err) {
+        console.error("Erro ao detectar anexo:", err);
+      }
     } catch (err) {
       setErroGeral("Erro ao detectar empresa automaticamente: " + (err as Error).message);
     }
@@ -717,5 +727,6 @@ export default function ImportarPage() {
     </div>
   );
 }
+
 
 
