@@ -1,18 +1,14 @@
 /**
  * Helper de autenticação para o módulo financeiro.
- * 
- * ADAPTE esta função para o sistema de auth real do Contábil Pro.
- * Exemplos comuns:
- *   - NextAuth: const session = await getServerSession(authOptions)
- *   - Clerk: const { userId } = await auth()
- *   - Cookie próprio: cookies().get("session")
- * 
- * O importante: empresaId e usuarioId DEVEM vir da sessão autenticada,
- * NUNCA do body ou query string enviados pelo cliente.
+ * Reaproveita a sessão real do Contábil Pro (src/lib/auth.ts + src/lib/empresa.ts):
+ *   - usuarioAtual()    -> lê o cookie "sessao", valida o token HMAC, retorna { id, email, admin }
+ *   - getEmpresaAtiva() -> resolve a empresa ativa (cookie "empresa_ativa_id" + permissões)
+ *
+ * empresaId e usuarioId SEMPRE vêm daqui — nunca do body ou query string
+ * enviados pelo cliente.
  */
 
-// Importe aqui a função de sessão real do projeto, ex:
-// import { getSessaoAtual } from "@/lib/auth";
+import { usuarioAtual, getEmpresaAtiva } from "@/lib/empresa";
 
 export type AuthContext = {
   empresaId: number;
@@ -20,39 +16,35 @@ export type AuthContext = {
   email?: string;
 };
 
-/**
- * Retorna o contexto autenticado ou lança erro 401.
- * SUBSTITUA a implementação abaixo pela real do seu sistema.
- */
-export async function getAuthContext(): Promise<AuthContext> {
-  // ========== ÚNICO PONTO A PLUGAR ==========
-  // O Contábil Pro já tem login/sessão funcionando (usado pelas outras rotas
-  // do sistema, ex. /api/minhas-empresas, /api/usuarios). Troque as 3 linhas
-  // abaixo pela mesma função de sessão que essas rotas já usam — geralmente
-  // algo como `const sessao = await getSessaoAtual()` ou `getUsuarioLogado()`.
-  //
-  // Exemplo (ajuste o nome real da função/import do seu projeto):
-  //   const sessao = await getSessaoAtual();
-  //   if (!sessao) throw new AuthError("Não autenticado");
-  //   return { empresaId: sessao.empresaId, usuarioId: sessao.usuarioId, email: sessao.email };
-
-  // FALLBACK TEMPORÁRIO — só ativo em desenvolvimento, falha fechado (401) em
-  // produção até a linha acima ser trocada pela sessão real. NÃO REMOVER o
-  // guard de NODE_ENV — é o que impede qualquer requisição sem sessão de
-  // passar como se fosse a empresa 24 quando o app for publicado.
-  if (process.env.NODE_ENV === "development") {
-    return { empresaId: 24, usuarioId: 1, email: "dev@local" };
-  }
-
-  throw new AuthError("Não autenticado");
-}
-
 export class AuthError extends Error {
   status = 401;
   constructor(message = "Não autenticado") {
     super(message);
     this.name = "AuthError";
   }
+}
+
+/**
+ * Retorna o contexto autenticado (usuário + empresa ativa) ou lança AuthError.
+ */
+export async function getAuthContext(): Promise<AuthContext> {
+  const usuario = await usuarioAtual();
+  if (!usuario) {
+    throw new AuthError("Não autenticado");
+  }
+
+  const empresa = await getEmpresaAtiva();
+  if (!empresa) {
+    throw new AuthError(
+      "Nenhuma empresa selecionada ou sem permissão de acesso. Selecione uma empresa antes de continuar."
+    );
+  }
+
+  return {
+    empresaId: empresa.id,
+    usuarioId: usuario.id,
+    email: usuario.email,
+  };
 }
 
 /**
