@@ -22,6 +22,7 @@ interface Conta {
 export default function ContasPagarPage() {
   const [contas, setContas] = useState<Conta[]>([]);
   const [loading, setLoading] = useState(true);
+  const [erro, setErro] = useState<string | null>(null);
   const [filtroStatus, setFiltroStatus] = useState<string>("ABERTO,PARCIAL");
   const [busca, setBusca] = useState("");
 
@@ -31,15 +32,18 @@ export default function ContasPagarPage() {
 
   async function load() {
     setLoading(true);
+    setErro(null);
     try {
       const params = new URLSearchParams();
       if (filtroStatus) params.set("status", filtroStatus);
       if (busca) params.set("busca", busca);
       const res = await fetch(`/api/financeiro/contas-pagar?${params}`);
       const data = await res.json();
-      setContas(data);
-    } catch (e) {
+      if (!res.ok) throw new Error(data?.error || `Erro ao carregar contas (${res.status})`);
+      setContas(Array.isArray(data) ? data : []);
+    } catch (e: any) {
       console.error(e);
+      setErro(e.message || "Erro ao carregar contas a pagar.");
     } finally {
       setLoading(false);
     }
@@ -104,7 +108,13 @@ export default function ContasPagarPage() {
               </tr>
             </thead>
             <tbody>
-              {loading ? (
+              {erro ? (
+                <tr>
+                  <td colSpan={8} className="px-4 py-10 text-center text-amber-700 bg-amber-50">
+                    {erro}
+                  </td>
+                </tr>
+              ) : loading ? (
                 <tr>
                   <td colSpan={8} className="px-4 py-10 text-center text-gray-400">
                     Carregando...
