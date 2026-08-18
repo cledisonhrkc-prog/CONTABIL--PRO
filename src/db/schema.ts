@@ -1,4 +1,4 @@
-import {
+﻿import {
   pgTable,
   serial,
   text,
@@ -84,7 +84,7 @@ export const itensNf = pgTable("itens_nf", {
   cst_cof: varchar("cst_cof", { length: 4 }),
 });
 
-// ---------------- Lançamentos (partidas dobradas) ----------------
+// ---------------- LanÃ§amentos (partidas dobradas) ----------------
 export const lancamentos = pgTable("lancamentos", {
   id: serial("id").primaryKey(),
   empresa_id: integer("empresa_id").notNull(),
@@ -107,7 +107,7 @@ export const lancamentoItens = pgTable("lancamento_itens", {
   credito: numeric("credito", { precision: 18, scale: 2 }).default("0"),
 });
 
-// ---------------- Apuração de Impostos ----------------
+// ---------------- ApuraÃ§Ã£o de Impostos ----------------
 export const apuracaoImpostos = pgTable("apuracao_impostos", {
   id: serial("id").primaryKey(),
   empresa_id: integer("empresa_id").notNull(),
@@ -119,7 +119,7 @@ export const apuracaoImpostos = pgTable("apuracao_impostos", {
   a_pagar: numeric("a_pagar", { precision: 18, scale: 2 }).default("0"),
 });
 
-// ---------------- Exercícios ----------------
+// ---------------- ExercÃ­cios ----------------
 export const exercicios = pgTable(
   "exercicios",
   {
@@ -134,7 +134,7 @@ export const exercicios = pgTable(
   })
 );
 
-// ---------------- Auditoria (R08 monofásico e outras) ----------------
+// ---------------- Auditoria (R08 monofÃ¡sico e outras) ----------------
 export const auditoria = pgTable("auditoria", {
   id: serial("id").primaryKey(),
   empresa_id: integer("empresa_id").notNull(),
@@ -162,6 +162,15 @@ export const contasReceber = pgTable("contas_receber", {
   vencimento: date("vencimento"),
   valor: numeric("valor", { precision: 18, scale: 2 }).default("0"),
   status: varchar("status", { length: 20 }).default("ABERTO"),
+  valorPago: numeric("valor_pago", { precision: 15, scale: 2 }).default("0"),
+  categoriaId: integer("categoria_id"),
+  centroCustoId: integer("centro_custo_id"),
+  contaBancariaId: integer("conta_bancaria_id"),
+  formaPagamento: text("forma_pagamento"),
+  descricao: text("descricao"),
+  observacao: text("observacao"),
+  participanteId: integer("participante_id"),
+  updatedAt: timestamp("updated_at").defaultNow(),
 });
 
 export const contasPagar = pgTable("contas_pagar", {
@@ -173,6 +182,15 @@ export const contasPagar = pgTable("contas_pagar", {
   vencimento: date("vencimento"),
   valor: numeric("valor", { precision: 18, scale: 2 }).default("0"),
   status: varchar("status", { length: 20 }).default("ABERTO"),
+  valorPago: numeric("valor_pago", { precision: 15, scale: 2 }).default("0"),
+  categoriaId: integer("categoria_id"),
+  centroCustoId: integer("centro_custo_id"),
+  contaBancariaId: integer("conta_bancaria_id"),
+  formaPagamento: text("forma_pagamento"),
+  descricao: text("descricao"),
+  observacao: text("observacao"),
+  participanteId: integer("participante_id"),
+  updatedAt: timestamp("updated_at").defaultNow(),
 });
 
 // ---------------- Bancos ----------------
