@@ -54,7 +54,7 @@ export default function BaixaReceberPage() {
 
     try {
       const valorNum = Number(valor.replace(/\./g, "").replace(",", "."));
-      const res = await fetch("/api/financeiro/baixar", {
+      const res = await fetch("/api/financeiro/baixas", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
