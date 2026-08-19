@@ -313,12 +313,35 @@ export async function criarPagamentoProLabore(empresaId: number, dados: ProLabor
     throw new Error("Esse vínculo não é do tipo PRO_LABORE.");
   }
 
-  // ATENÇÃO: Escopo A não tem o motor de cálculo automático de INSS/IRRF
-  // (isso é o Escopo B/C, com dp_calcular_inss/dp_calcular_irrf e as
-  // tabelas de faixas progressivas). Aqui o contador informa os valores
-  // já calculados por fora, e o sistema só registra e soma.
-  const valorInss = Number((dados.valorInss ?? 0).toFixed(2));
-  const valorIrrf = Number((dados.valorIrrf ?? 0).toFixed(2));
+  // Se valorInss/valorIrrf não vierem informados, calcula automaticamente
+  // via dp_calcular_inss/dp_calcular_irrf (motor validado — ver setup-calculo).
+  // Reaproveita dependentes já cadastrados (colaborador_dependentes) quando
+  // existirem, em vez de assumir 0 sempre.
+  let valorInss = dados.valorInss;
+  let valorIrrf = dados.valorIrrf;
+
+  if (valorInss === undefined || valorIrrf === undefined) {
+    const depResult = await db.execute(sql`
+      SELECT COUNT(*)::int AS qtd FROM colaborador_dependentes
+      WHERE colaborador_id = ${v.colaborador_id} AND is_dependente_irrf = true
+    `);
+    const qtdDependentes = Number((depResult.rows[0] as any)?.qtd ?? 0);
+
+    if (valorInss === undefined) {
+      const r = await db.execute(sql`SELECT dp_calcular_inss(${dados.valorBruto}::numeric, CURRENT_DATE) AS v`);
+      valorInss = Number((r.rows[0] as any)?.v ?? 0);
+    }
+    if (valorIrrf === undefined) {
+      const baseIrrf = dados.valorBruto - valorInss;
+      const r = await db.execute(sql`
+        SELECT dp_calcular_irrf(${baseIrrf}::numeric, ${qtdDependentes}::int, CURRENT_DATE, false) AS v
+      `);
+      valorIrrf = Number((r.rows[0] as any)?.v ?? 0);
+    }
+  }
+
+  valorInss = Number(valorInss.toFixed(2));
+  valorIrrf = Number(valorIrrf.toFixed(2));
   const valorLiquido = Number((dados.valorBruto - valorInss - valorIrrf).toFixed(2));
 
   const r = await db.execute(sql`

@@ -14,7 +14,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, Calculator } from "lucide-react";
 
 type VinculoOpcao = { id: number; colaborador_nome: string; valor_pro_labore: string };
 
@@ -24,8 +24,11 @@ export default function NovoPagamentoProLaborePage() {
   const [vinculoId, setVinculoId] = useState<string>("");
   const [competencia, setCompetencia] = useState(new Date().toISOString().slice(0, 7));
   const [valorBruto, setValorBruto] = useState("");
+  const [calculoAutomatico, setCalculoAutomatico] = useState(true);
   const [valorInss, setValorInss] = useState("");
   const [valorIrrf, setValorIrrf] = useState("");
+  const [calculando, setCalculando] = useState(false);
+  const [previa, setPrevia] = useState<{ valorInss: number; valorIrrf: number; valorLiquido: number; qtdDependentes: number } | null>(null);
   const [saving, setSaving] = useState(false);
   const [erro, setErro] = useState("");
   const [carregandoVinculos, setCarregandoVinculos] = useState(true);
@@ -40,9 +43,38 @@ export default function NovoPagamentoProLaborePage() {
 
   function selecionarVinculo(id: string) {
     setVinculoId(id);
+    setPrevia(null);
     const v = vinculos.find((x) => String(x.id) === id);
     if (v?.valor_pro_labore) setValorBruto(v.valor_pro_labore);
   }
+
+  async function calcularPrevia() {
+    if (!valorBruto || Number(valorBruto) <= 0) return;
+    setCalculando(true);
+    setErro("");
+    try {
+      const params = new URLSearchParams({ valorBruto });
+      if (vinculoId) params.set("vinculoId", vinculoId);
+      const res = await fetch(`/api/dp/calcular-inss-irrf?${params}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Erro ao calcular");
+      setPrevia(data);
+    } catch (e: any) {
+      setErro(e.message || "Erro ao calcular INSS/IRRF.");
+    } finally {
+      setCalculando(false);
+    }
+  }
+
+  useEffect(() => {
+    if (calculoAutomatico && valorBruto && Number(valorBruto) > 0) {
+      const t = setTimeout(() => calcularPrevia(), 400);
+      return () => clearTimeout(t);
+    } else {
+      setPrevia(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [valorBruto, vinculoId, calculoAutomatico]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -56,8 +88,11 @@ export default function NovoPagamentoProLaborePage() {
           vinculoId: Number(vinculoId),
           competencia,
           valorBruto: Number(valorBruto),
-          valorInss: valorInss ? Number(valorInss) : undefined,
-          valorIrrf: valorIrrf ? Number(valorIrrf) : undefined,
+          // Se o cálculo automático estiver ligado, não manda valorInss/valorIrrf
+          // — o servidor calcula sozinho (mesmo motor da prévia). Se estiver
+          // desligado, manda os valores manuais informados.
+          valorInss: calculoAutomatico ? undefined : (valorInss ? Number(valorInss) : undefined),
+          valorIrrf: calculoAutomatico ? undefined : (valorIrrf ? Number(valorIrrf) : undefined),
         }),
       });
       const data = await res.json();
@@ -122,15 +157,55 @@ export default function NovoPagamentoProLaborePage() {
                 <Input type="number" step="0.01" value={valorBruto} onChange={(e) => setValorBruto(e.target.value)} required />
               </div>
 
-              <div className="space-y-2">
-                <Label>INSS (R$) — informe o valor já calculado</Label>
-                <Input type="number" step="0.01" value={valorInss} onChange={(e) => setValorInss(e.target.value)} />
+              <div className="flex items-center gap-2 py-1">
+                <input
+                  type="checkbox"
+                  id="calc-auto"
+                  checked={calculoAutomatico}
+                  onChange={(e) => setCalculoAutomatico(e.target.checked)}
+                  className="h-4 w-4"
+                />
+                <label htmlFor="calc-auto" className="text-sm cursor-pointer flex items-center gap-1">
+                  <Calculator className="h-3.5 w-3.5" />
+                  Calcular INSS/IRRF automaticamente (tabela oficial vigente)
+                </label>
               </div>
 
-              <div className="space-y-2">
-                <Label>IRRF (R$) — informe o valor já calculado</Label>
-                <Input type="number" step="0.01" value={valorIrrf} onChange={(e) => setValorIrrf(e.target.value)} />
-              </div>
+              {calculoAutomatico ? (
+                <div className="rounded-lg border bg-muted/30 p-3 text-sm space-y-1">
+                  {calculando ? (
+                    <p className="text-muted-foreground">Calculando...</p>
+                  ) : previa ? (
+                    <>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">INSS</span>
+                        <span>R$ {previa.valorInss.toFixed(2)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">IRRF ({previa.qtdDependentes} dependente{previa.qtdDependentes !== 1 ? "s" : ""})</span>
+                        <span>R$ {previa.valorIrrf.toFixed(2)}</span>
+                      </div>
+                      <div className="flex justify-between font-medium border-t pt-1 mt-1">
+                        <span>Líquido</span>
+                        <span>R$ {previa.valorLiquido.toFixed(2)}</span>
+                      </div>
+                    </>
+                  ) : (
+                    <p className="text-muted-foreground">Informe o valor bruto para ver a prévia.</p>
+                  )}
+                </div>
+              ) : (
+                <>
+                  <div className="space-y-2">
+                    <Label>INSS (R$) — valor manual</Label>
+                    <Input type="number" step="0.01" value={valorInss} onChange={(e) => setValorInss(e.target.value)} />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>IRRF (R$) — valor manual</Label>
+                    <Input type="number" step="0.01" value={valorIrrf} onChange={(e) => setValorIrrf(e.target.value)} />
+                  </div>
+                </>
+              )}
 
               {erro && <p className="text-sm text-red-600">{erro}</p>}
 
