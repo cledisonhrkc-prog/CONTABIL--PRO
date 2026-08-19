@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Dashboard Financeiro Completo
  * Contábil Pro — Módulo Financeiro
  */
@@ -123,6 +123,8 @@ export default function FinanceiroDashboard() {
           >
             Transferência
           </Link>
+          <a href="/api/financeiro/relatorios/fluxo-caixa/pdf" className="px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700">Exportar PDF</a>
+          <a href="/api/financeiro/relatorios/fluxo-caixa/excel" className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700">Exportar Excel</a>
           <Link
             href="/financeiro/contas-bancarias"
             className="px-4 py-2 bg-white border border-gray-300 rounded-lg text-sm font-medium hover:bg-gray-50"
@@ -330,3 +332,4 @@ function Atalho({ href, label }: { href: string; label: string }) {
     </Link>
   );
 }
+
