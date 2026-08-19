@@ -8,6 +8,7 @@ const menu: Array<{ label: string; href: string; icon: string; group?: string }>
   { label: "Empresa", href: "/empresa", icon: "🏢" },
   { label: "Cadastros", href: "/cadastros", icon: "📋" },
   { label: "Lançamentos", href: "/lancamentos", icon: "📝" },
+  { label: "Departamento Pessoal", href: "/dp", icon: "DP" },
   { label: "Financeiro", href: "/financeiro", icon: "💰" },
   { label: "Fiscal", href: "/fiscal", icon: "🧾" },
   { label: "Contábil", href: "/contabil", icon: "📊" },
