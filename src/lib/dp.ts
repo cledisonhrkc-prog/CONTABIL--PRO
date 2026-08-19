@@ -153,8 +153,13 @@ export async function atualizarColaborador(
       nome_social = COALESCE(${dados.nomeSocial ?? null}, nome_social),
       email = COALESCE(${dados.email ?? null}, email),
       telefone = COALESCE(${dados.telefone ?? null}, telefone),
+      genero = COALESCE(${dados.genero ?? null}, genero),
+      estado_civil = COALESCE(${dados.estadoCivil ?? null}, estado_civil),
+      data_nascimento = COALESCE(${dados.dataNascimento ?? null}, data_nascimento),
+      pis_pasep = COALESCE(${dados.pisPasep?.replace(/\D/g, "") ?? null}, pis_pasep),
       is_ativo = COALESCE(${dados.isAtivo ?? null}, is_ativo),
-      observacoes = COALESCE(${dados.observacoes ?? null}, observacoes)
+      observacoes = COALESCE(${dados.observacoes ?? null}, observacoes),
+      updated_at = NOW()
     WHERE id = ${id} AND empresa_id = ${empresaId}
     RETURNING *
   `);
@@ -362,10 +367,105 @@ export async function marcarProLaborePago(empresaId: number, id: number, dataPag
   const r = await db.execute(sql`
     UPDATE pro_labore_pagamentos
     SET status = 'PAGO', data_pagamento = ${dataPagamento}
+    WHERE id = ${id} AND empresa_id = ${empresaId} AND status = 'PENDENTE'
+    RETURNING *
+  `);
+  if (!r.rows[0]) throw new Error("Pagamento não encontrado, não pertence a esta empresa, ou não está mais pendente.");
+  return r.rows[0];
+}
+
+/**
+ * Cancela um pagamento de pró-labore. Só funciona em status PENDENTE — um
+ * pagamento já marcado como PAGO não pode ser cancelado por aqui (evita
+ * apagar rastro de algo que já saiu do caixa; se precisar estornar um
+ * pagamento já feito, isso deveria acontecer via lançamento financeiro,
+ * não só mudando o status aqui).
+ */
+export async function cancelarPagamentoProLabore(empresaId: number, id: number, motivo?: string) {
+  const r = await db.execute(sql`
+    UPDATE pro_labore_pagamentos
+    SET status = 'CANCELADO', observacoes = COALESCE(${motivo ?? null}, observacoes)
+    WHERE id = ${id} AND empresa_id = ${empresaId} AND status = 'PENDENTE'
+    RETURNING *
+  `);
+  if (!r.rows[0]) throw new Error("Pagamento não encontrado, não pertence a esta empresa, ou já não está mais pendente.");
+  return r.rows[0];
+}
+
+/**
+ * Resumo de pró-labore agrupado por competência e sócio — total bruto,
+ * total líquido, quantidade de pagamentos. Ignora cancelados.
+ */
+export async function resumoProLaborePorCompetencia(empresaId: number, opts: { competencia?: string } = {}) {
+  const r = await db.execute(sql`
+    SELECT c.id AS colaborador_id, c.nome_completo, p.competencia,
+      SUM(p.valor_bruto) AS total_bruto,
+      SUM(p.valor_inss) AS total_inss,
+      SUM(p.valor_irrf) AS total_irrf,
+      SUM(p.valor_liquido) AS total_liquido,
+      COUNT(*) AS qtd_pagamentos,
+      COUNT(*) FILTER (WHERE p.status = 'PAGO') AS qtd_pagos,
+      COUNT(*) FILTER (WHERE p.status = 'PENDENTE') AS qtd_pendentes
+    FROM pro_labore_pagamentos p
+    JOIN colaboradores c ON c.id = p.colaborador_id
+    WHERE p.empresa_id = ${empresaId}
+      AND p.status != 'CANCELADO'
+      AND (${opts.competencia ?? null}::text IS NULL OR p.competencia = ${opts.competencia ?? null})
+    GROUP BY c.id, c.nome_completo, p.competencia
+    ORDER BY p.competencia DESC, c.nome_completo
+  `);
+  return r.rows;
+}
+
+/**
+ * Atualiza dados editáveis de um vínculo (cargo, salário/pró-labore,
+ * carga horária). O trigger dp_validar_empresa_colaborador() do banco
+ * garante isolamento por empresa mesmo se algo aqui falhar.
+ */
+export async function atualizarVinculo(
+  empresaId: number,
+  id: number,
+  dados: { cargo?: string; salarioBase?: number; valorProLabore?: number; cargaHorariaSemanal?: number; observacoes?: string }
+) {
+  const existente = await db.execute(sql`
+    SELECT id FROM colaborador_vinculos WHERE id = ${id} AND empresa_id = ${empresaId} AND deleted_at IS NULL
+  `);
+  if (existente.rows.length === 0) {
+    throw new Error("Vínculo não encontrado nesta empresa.");
+  }
+
+  const r = await db.execute(sql`
+    UPDATE colaborador_vinculos SET
+      cargo = COALESCE(${dados.cargo ?? null}, cargo),
+      salario_base = COALESCE(${dados.salarioBase ?? null}, salario_base),
+      valor_pro_labore = COALESCE(${dados.valorProLabore ?? null}, valor_pro_labore),
+      carga_horaria_semanal = COALESCE(${dados.cargaHorariaSemanal ?? null}, carga_horaria_semanal),
+      observacoes = COALESCE(${dados.observacoes ?? null}, observacoes),
+      updated_at = NOW()
     WHERE id = ${id} AND empresa_id = ${empresaId}
     RETURNING *
   `);
-  if (!r.rows[0]) throw new Error("Pagamento não encontrado nesta empresa.");
+  return r.rows[0];
+}
+
+/**
+ * Encerra um vínculo (data_demissao + is_ativo=false). Não mexe no
+ * colaborador — um colaborador pode ter outros vínculos ativos.
+ */
+export async function encerrarVinculo(empresaId: number, id: number, dataDemissao: string) {
+  const existente = await db.execute(sql`
+    SELECT id FROM colaborador_vinculos WHERE id = ${id} AND empresa_id = ${empresaId} AND deleted_at IS NULL AND is_ativo = true
+  `);
+  if (existente.rows.length === 0) {
+    throw new Error("Vínculo ativo não encontrado nesta empresa.");
+  }
+
+  const r = await db.execute(sql`
+    UPDATE colaborador_vinculos
+    SET data_demissao = ${dataDemissao}, is_ativo = false, updated_at = NOW()
+    WHERE id = ${id} AND empresa_id = ${empresaId}
+    RETURNING *
+  `);
   return r.rows[0];
 }
 

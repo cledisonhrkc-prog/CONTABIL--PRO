@@ -38,7 +38,7 @@ export default function ProLaborePage() {
   const [pagamentos, setPagamentos] = useState<Pagamento[]>([]);
   const [loading, setLoading] = useState(true);
   const [erro, setErro] = useState<string | null>(null);
-  const [marcandoId, setMarcandoId] = useState<number | null>(null);
+  const [processandoId, setProcessandoId] = useState<number | null>(null);
 
   useEffect(() => {
     load();
@@ -60,7 +60,7 @@ export default function ProLaborePage() {
   }
 
   async function marcarPago(id: number) {
-    setMarcandoId(id);
+    setProcessandoId(id);
     try {
       const res = await fetch(`/api/dp/pro-labore/${id}`, {
         method: "PATCH",
@@ -73,7 +73,26 @@ export default function ProLaborePage() {
     } catch (e: any) {
       alert(e.message || "Erro ao marcar como pago.");
     } finally {
-      setMarcandoId(null);
+      setProcessandoId(null);
+    }
+  }
+
+  async function cancelar(id: number) {
+    const motivo = prompt("Motivo do cancelamento (opcional):") || undefined;
+    setProcessandoId(id);
+    try {
+      const res = await fetch(`/api/dp/pro-labore/${id}/cancelar`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ motivo }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Erro ao cancelar");
+      await load();
+    } catch (e: any) {
+      alert(e.message || "Erro ao cancelar pagamento.");
+    } finally {
+      setProcessandoId(null);
     }
   }
 
@@ -87,6 +106,9 @@ export default function ProLaborePage() {
         <div className="flex gap-2">
           <Button asChild variant="ghost">
             <Link href="/dp">← Voltar</Link>
+          </Button>
+          <Button asChild variant="outline">
+            <Link href="/dp/pro-labore/resumo">Resumo</Link>
           </Button>
           <Button asChild>
             <Link href="/dp/pro-labore/novo">+ Novo pagamento</Link>
@@ -140,14 +162,24 @@ export default function ProLaborePage() {
                     </TableCell>
                     <TableCell>
                       {p.status === "PENDENTE" && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          disabled={marcandoId === p.id}
-                          onClick={() => marcarPago(p.id)}
-                        >
-                          {marcandoId === p.id ? "..." : "Marcar pago"}
-                        </Button>
+                        <div className="flex gap-1">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={processandoId === p.id}
+                            onClick={() => marcarPago(p.id)}
+                          >
+                            {processandoId === p.id ? "..." : "Marcar pago"}
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="destructive"
+                            disabled={processandoId === p.id}
+                            onClick={() => cancelar(p.id)}
+                          >
+                            Cancelar
+                          </Button>
+                        </div>
                       )}
                     </TableCell>
                   </TableRow>
