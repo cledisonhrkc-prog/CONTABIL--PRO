@@ -595,3 +595,40 @@ export async function listarHolerites(empresaId: number, opts: { competencia?: s
   `);
   return r.rows;
 }
+
+/**
+ * Processa a folha de TODOS os colaboradores CLT ativos da empresa numa
+ * competência, um a um, reaproveitando processarFolhaCLT (mesmo motor de
+ * cálculo já testado — não duplica INSS/IRRF em outro lugar). Continua
+ * mesmo se um colaborador falhar, reportando o erro individual em vez de
+ * abortar a folha inteira por causa de um problema isolado.
+ */
+export async function processarFolhaCLTLote(empresaId: number, competencia: string) {
+  const clts = await db.execute(sql`
+    SELECT DISTINCT colaborador_id FROM colaborador_vinculos
+    WHERE empresa_id = ${empresaId} AND tipo_vinculo = 'CLT' AND is_ativo = true AND deleted_at IS NULL
+  `);
+
+  const processados: any[] = [];
+  const erros: { colaboradorId: number; erro: string }[] = [];
+
+  for (const row of clts.rows as any[]) {
+    try {
+      const holerite = await processarFolhaCLT(empresaId, {
+        colaboradorId: row.colaborador_id,
+        competencia,
+      });
+      processados.push(holerite);
+    } catch (e: any) {
+      erros.push({ colaboradorId: row.colaborador_id, erro: e.message || "Erro desconhecido" });
+    }
+  }
+
+  return {
+    competencia,
+    totalClt: clts.rows.length,
+    processados: processados.length,
+    erros,
+    holerites: processados,
+  };
+}
