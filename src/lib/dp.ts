@@ -368,3 +368,130 @@ export async function marcarProLaborePago(empresaId: number, id: number, dataPag
   if (!r.rows[0]) throw new Error("Pagamento não encontrado nesta empresa.");
   return r.rows[0];
 }
+
+// ============================================================
+// RUBRICAS (proventos/descontos fixos, folha CLT)
+// ============================================================
+export async function listarRubricas(empresaId: number) {
+  const r = await db.execute(sql`
+    SELECT * FROM dp_rubricas WHERE empresa_id = ${empresaId} AND is_ativo = true ORDER BY nome
+  `);
+  return r.rows;
+}
+
+export async function criarRubrica(
+  empresaId: number,
+  dados: { codigo: string; nome: string; tipo: "PROVENTO" | "DESCONTO"; valorFixo: number }
+) {
+  const existente = await db.execute(sql`
+    SELECT id FROM dp_rubricas WHERE empresa_id = ${empresaId} AND codigo = ${dados.codigo}
+  `);
+  if (existente.rows.length > 0) {
+    throw new Error("Já existe uma rubrica com esse código nesta empresa.");
+  }
+  const r = await db.execute(sql`
+    INSERT INTO dp_rubricas (empresa_id, codigo, nome, tipo, valor_fixo)
+    VALUES (${empresaId}, ${dados.codigo}, ${dados.nome}, ${dados.tipo}, ${dados.valorFixo})
+    RETURNING *
+  `);
+  return r.rows[0];
+}
+
+// ============================================================
+// FOLHA CLT — PROCESSAMENTO MENSAL
+// ============================================================
+export async function processarFolhaCLT(
+  empresaId: number,
+  dados: { colaboradorId: number; competencia: string }
+) {
+  const vinculo = await db.execute(sql`
+    SELECT id, colaborador_id, salario_base FROM colaborador_vinculos
+    WHERE colaborador_id = ${dados.colaboradorId} AND empresa_id = ${empresaId}
+      AND tipo_vinculo = 'CLT' AND is_ativo = true AND deleted_at IS NULL
+  `);
+  const v = vinculo.rows[0] as any;
+  if (!v) throw new Error("Vínculo CLT ativo não encontrado para esse colaborador, nesta empresa.");
+
+  const salarioBase = Number(v.salario_base);
+  if (!salarioBase || salarioBase <= 0) {
+    throw new Error("Vínculo CLT sem salário base cadastrado.");
+  }
+
+  // Reaproveita o motor de cálculo já validado (dp_calcular_inss/dp_calcular_irrf)
+  const inssResult = await db.execute(sql`SELECT dp_calcular_inss(${salarioBase}::numeric, CURRENT_DATE) AS v`);
+  const valorInss = Number((inssResult.rows[0] as any)?.v ?? 0);
+
+  const depResult = await db.execute(sql`
+    SELECT COUNT(*)::int AS qtd FROM colaborador_dependentes
+    WHERE colaborador_id = ${dados.colaboradorId} AND is_dependente_irrf = true
+  `);
+  const qtdDependentes = Number((depResult.rows[0] as any)?.qtd ?? 0);
+
+  const baseIrrf = salarioBase - valorInss;
+  const irrfResult = await db.execute(sql`
+    SELECT dp_calcular_irrf(${baseIrrf}::numeric, ${qtdDependentes}::int, CURRENT_DATE, false) AS v
+  `);
+  const valorIrrf = Number((irrfResult.rows[0] as any)?.v ?? 0);
+
+  const fgtsMes = Number((salarioBase * 0.08).toFixed(2));
+
+  const rubricas = await db.execute(sql`
+    SELECT * FROM dp_rubricas WHERE empresa_id = ${empresaId} AND is_ativo = true
+  `);
+
+  let totalProventos = salarioBase;
+  let totalDescontos = valorInss + valorIrrf;
+  const itens: Array<{ codigo: string; nome: string; tipo: string; valor: number }> = [
+    { codigo: "SALARIO", nome: "Salário base", tipo: "PROVENTO", valor: salarioBase },
+    { codigo: "INSS", nome: "INSS", tipo: "DESCONTO", valor: valorInss },
+    { codigo: "IRRF", nome: "IRRF", tipo: "DESCONTO", valor: valorIrrf },
+  ];
+
+  for (const rub of rubricas.rows as any[]) {
+    const valor = Number(rub.valor_fixo);
+    if (rub.tipo === "PROVENTO") {
+      totalProventos += valor;
+    } else {
+      totalDescontos += valor;
+    }
+    itens.push({ codigo: rub.codigo, nome: rub.nome, tipo: rub.tipo, valor });
+  }
+
+  totalProventos = Number(totalProventos.toFixed(2));
+  totalDescontos = Number(totalDescontos.toFixed(2));
+  const totalLiquido = Number((totalProventos - totalDescontos).toFixed(2));
+
+  const r = await db.execute(sql`
+    INSERT INTO dp_holerites (
+      empresa_id, colaborador_id, vinculo_id, competencia, salario_base,
+      total_proventos, total_descontos, total_liquido, fgts_mes, valor_inss, valor_irrf,
+      itens_json, status
+    ) VALUES (
+      ${empresaId}, ${dados.colaboradorId}, ${v.id}, ${dados.competencia}, ${salarioBase},
+      ${totalProventos}, ${totalDescontos}, ${totalLiquido}, ${fgtsMes}, ${valorInss}, ${valorIrrf},
+      ${JSON.stringify(itens)}, 'PROCESSADO'
+    )
+    ON CONFLICT (colaborador_id, competencia) DO UPDATE SET
+      total_proventos = EXCLUDED.total_proventos,
+      total_descontos = EXCLUDED.total_descontos,
+      total_liquido = EXCLUDED.total_liquido,
+      fgts_mes = EXCLUDED.fgts_mes,
+      valor_inss = EXCLUDED.valor_inss,
+      valor_irrf = EXCLUDED.valor_irrf,
+      itens_json = EXCLUDED.itens_json
+    RETURNING *
+  `);
+  return r.rows[0];
+}
+
+export async function listarHolerites(empresaId: number, opts: { competencia?: string } = {}) {
+  const r = await db.execute(sql`
+    SELECT h.*, c.nome_completo AS colaborador_nome
+    FROM dp_holerites h
+    JOIN colaboradores c ON c.id = h.colaborador_id
+    WHERE h.empresa_id = ${empresaId}
+      AND (${opts.competencia ?? null}::text IS NULL OR h.competencia = ${opts.competencia ?? null})
+    ORDER BY h.competencia DESC, c.nome_completo
+  `);
+  return r.rows;
+}
