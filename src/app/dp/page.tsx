@@ -109,6 +109,14 @@ export default function DPDashboard() {
         </Card>
       </div>
 
+      {/* Atalhos — mesmo padrão visual do módulo Financeiro */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <Atalho href="/dp/colaboradores" label="Colaboradores" />
+        <Atalho href="/dp/colaboradores/novo" label="Novo Colaborador" />
+        <Atalho href="/dp/pro-labore" label="Pró-labore" />
+        <Atalho href="/dp/pro-labore/novo" label="Novo Pagamento" />
+      </div>
+
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle>Pró-labore pendente</CardTitle>
@@ -132,5 +140,16 @@ export default function DPDashboard() {
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+function Atalho({ href, label }: { href: string; label: string }) {
+  return (
+    <Link
+      href={href}
+      className="block p-4 bg-white border border-gray-200 rounded-lg text-center text-sm font-medium text-gray-700 hover:bg-gray-50 hover:border-blue-300 transition"
+    >
+      {label}
+    </Link>
   );
 }
