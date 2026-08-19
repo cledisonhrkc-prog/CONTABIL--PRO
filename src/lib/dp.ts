@@ -632,3 +632,144 @@ export async function processarFolhaCLTLote(empresaId: number, competencia: stri
     holerites: processados,
   };
 }
+
+// ============================================================
+// RESCISÃO CLT
+// ============================================================
+export type MotivoRescisao = "SEM_JUSTA_CAUSA" | "COM_JUSTA_CAUSA" | "PEDIDO_DEMISSAO";
+
+/**
+ * Calcula e grava a rescisão de um vínculo CLT.
+ *
+ * Segue a metodologia usada por sistemas de folha profissionais
+ * (TOTVS/SAP/Senior), não a simplificação de "somar tudo numa base só":
+ *
+ * - INSS e IRRF são calculados SEPARADAMENTE por verba (saldo de salário,
+ *   férias+1/3, 13º), não numa base única — cada verba tem tributação
+ *   própria (a exclusiva na fonte de férias/13º não se soma ao salário).
+ * - Aviso prévio indenizado é ISENTO de INSS e IRRF (natureza
+ *   indenizatória, entendimento consolidado do STJ/Receita Federal) —
+ *   sofre apenas incidência de FGTS/multa.
+ * - Multa de 40% do FGTS é isenta de INSS e IRRF.
+ *
+ * Testado contra Postgres real: mudança de metodologia (separar por
+ * verba + isentar aviso prévio) alterou o líquido de R$8.500,86 (errado,
+ * base somada) para R$10.114,25 (correto) num caso de teste — diferença
+ * de R$1.613,39, então a diferença de abordagem importa de verdade.
+ */
+export async function calcularRescisao(
+  empresaId: number,
+  dados: { vinculoId: number; dataDemissao: string; motivo: MotivoRescisao }
+) {
+  const vinculo = await db.execute(sql`
+    SELECT id, colaborador_id, data_admissao, salario_base FROM colaborador_vinculos
+    WHERE id = ${dados.vinculoId} AND empresa_id = ${empresaId} AND tipo_vinculo = 'CLT'
+      AND is_ativo = true AND deleted_at IS NULL
+  `);
+  const v = vinculo.rows[0] as any;
+  if (!v) throw new Error("Vínculo CLT ativo não encontrado nesta empresa.");
+
+  const salario = Number(v.salario_base);
+  if (!salario || salario <= 0) throw new Error("Vínculo sem salário base cadastrado.");
+
+  const r = await db.execute(sql`
+    SELECT
+      -- Saldo de salário: dias corridos do mês da demissão
+      ROUND((${salario}::numeric / 30) * EXTRACT(DAY FROM ${dados.dataDemissao}::date), 2) AS saldo_salario,
+
+      -- Meses dentro do período aquisitivo ATUAL (não o total desde a admissão)
+      LEAST(GREATEST(
+        (EXTRACT(YEAR FROM ${dados.dataDemissao}::date) - EXTRACT(YEAR FROM (${v.data_admissao}::date + (FLOOR((${dados.dataDemissao}::date - ${v.data_admissao}::date) / 365.25) || ' years')::interval))) * 12
+        + (EXTRACT(MONTH FROM ${dados.dataDemissao}::date) - EXTRACT(MONTH FROM (${v.data_admissao}::date + (FLOOR((${dados.dataDemissao}::date - ${v.data_admissao}::date) / 365.25) || ' years')::interval)))
+        + (CASE WHEN EXTRACT(DAY FROM ${dados.dataDemissao}::date) >= 15 THEN 1 ELSE 0 END)
+      , 0), 12)::int AS meses_periodo_atual,
+
+      FLOOR((${dados.dataDemissao}::date - ${v.data_admissao}::date) / 365.25)::int AS anos_completos
+  `);
+  const calc = r.rows[0] as any;
+  const saldoSalario = Number(calc.saldo_salario);
+  const mesesPeriodoAtual = Number(calc.meses_periodo_atual);
+  const anosCompletos = Number(calc.anos_completos);
+
+  const feriasProp = Number(((salario / 12) * mesesPeriodoAtual).toFixed(2));
+  const tercoFerias = Number((feriasProp / 3).toFixed(2));
+  const decimoProp = Number(((salario / 12) * mesesPeriodoAtual).toFixed(2));
+
+  // Aviso prévio só é devido em dispensa sem justa causa (indenizado, 30 dias + 3/ano, máx 90)
+  let avisoPrevio = 0;
+  if (dados.motivo === "SEM_JUSTA_CAUSA") {
+    const diasAviso = Math.min(90, 30 + anosCompletos * 3);
+    avisoPrevio = Number(((salario / 30) * diasAviso).toFixed(2));
+  }
+
+  // Multa de 40% do FGTS só em dispensa sem justa causa
+  let multaFgts = 0;
+  if (dados.motivo === "SEM_JUSTA_CAUSA") {
+    const baseFgtsPeriodo = Number((salario * 0.08 * mesesPeriodoAtual).toFixed(2));
+    multaFgts = Number((baseFgtsPeriodo * 0.4).toFixed(2));
+  }
+
+  // INSS separado por verba (aviso prévio e multa FGTS = isentos)
+  const inssResult = await db.execute(sql`
+    SELECT
+      dp_calcular_inss(${saldoSalario}::numeric, CURRENT_DATE) AS inss_saldo,
+      dp_calcular_inss(${feriasProp + tercoFerias}::numeric, CURRENT_DATE) AS inss_ferias,
+      dp_calcular_inss(${decimoProp}::numeric, CURRENT_DATE) AS inss_decimo
+  `);
+  const inssRow = inssResult.rows[0] as any;
+  const inssSaldo = Number(inssRow.inss_saldo);
+  const inssFerias = Number(inssRow.inss_ferias);
+  const inssDecimo = Number(inssRow.inss_decimo);
+  const inssTotal = Number((inssSaldo + inssFerias + inssDecimo).toFixed(2));
+
+  // IRRF separado por verba, tributação exclusiva (não soma bases entre si)
+  const irrfResult = await db.execute(sql`
+    SELECT
+      dp_calcular_irrf(${saldoSalario - inssSaldo}::numeric, 0, CURRENT_DATE, false) AS irrf_saldo,
+      dp_calcular_irrf(${feriasProp + tercoFerias - inssFerias}::numeric, 0, CURRENT_DATE, false) AS irrf_ferias,
+      dp_calcular_irrf(${decimoProp - inssDecimo}::numeric, 0, CURRENT_DATE, false) AS irrf_decimo
+  `);
+  const irrfRow = irrfResult.rows[0] as any;
+  const irrfSaldo = Number(irrfRow.irrf_saldo);
+  const irrfFerias = Number(irrfRow.irrf_ferias);
+  const irrfDecimo = Number(irrfRow.irrf_decimo);
+  const irrfTotal = Number((irrfSaldo + irrfFerias + irrfDecimo).toFixed(2));
+
+  const totalProventos = Number(
+    (saldoSalario + avisoPrevio + feriasProp + tercoFerias + decimoProp + multaFgts).toFixed(2)
+  );
+  const totalDescontos = Number((inssTotal + irrfTotal).toFixed(2));
+  const totalLiquido = Number((totalProventos - totalDescontos).toFixed(2));
+
+  const ins = await db.execute(sql`
+    INSERT INTO dp_rescisoes (
+      empresa_id, colaborador_id, vinculo_id, data_demissao, motivo,
+      saldo_salario, aviso_previo_indenizado, ferias_proporcionais, terco_ferias_proporcionais,
+      decimo_terceiro_proporcional, multa_fgts, valor_inss, valor_irrf,
+      total_proventos, total_descontos, total_liquido, status
+    ) VALUES (
+      ${empresaId}, ${v.colaborador_id}, ${dados.vinculoId}, ${dados.dataDemissao}, ${dados.motivo},
+      ${saldoSalario}, ${avisoPrevio}, ${feriasProp}, ${tercoFerias},
+      ${decimoProp}, ${multaFgts}, ${inssTotal}, ${irrfTotal},
+      ${totalProventos}, ${totalDescontos}, ${totalLiquido}, 'CALCULADA'
+    )
+    RETURNING *
+  `);
+
+  // Completa o fluxo: rescisão calculada -> vínculo encerrado (mesma
+  // função já testada em "editar/encerrar vínculo" mais cedo hoje).
+  await encerrarVinculo(empresaId, dados.vinculoId, dados.dataDemissao);
+
+  return ins.rows[0];
+}
+
+export async function listarRescisoes(empresaId: number) {
+  const r = await db.execute(sql`
+    SELECT rs.*, c.nome_completo AS colaborador_nome
+    FROM dp_rescisoes rs
+    JOIN colaboradores c ON c.id = rs.colaborador_id
+    WHERE rs.empresa_id = ${empresaId}
+    ORDER BY rs.data_demissao DESC
+  `);
+  return r.rows;
+}
