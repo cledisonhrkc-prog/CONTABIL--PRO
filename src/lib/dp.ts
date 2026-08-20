@@ -333,7 +333,10 @@ export async function criarPagamentoProLabore(empresaId: number, dados: ProLabor
     const qtdDependentes = Number((depResult.rows[0] as any)?.qtd ?? 0);
 
     if (valorInss === undefined) {
-      const r = await db.execute(sql`SELECT dp_calcular_inss(${dados.valorBruto}::numeric, CURRENT_DATE) AS v`);
+      // CORRIGIDO: pró-labore de sócio usa 11% fixo (contribuinte
+      // individual), não a tabela progressiva de CLT. Confirmado contra
+      // múltiplas fontes contábeis/gov.br em 20/08/2026.
+      const r = await db.execute(sql`SELECT dp_calcular_inss_prolabore(${dados.valorBruto}::numeric, CURRENT_DATE) AS v`);
       valorInss = Number((r.rows[0] as any)?.v ?? 0);
     }
     if (valorIrrf === undefined) {
