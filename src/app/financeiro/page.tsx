@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Dashboard Financeiro Completo
  * Contábil Pro — Módulo Financeiro
  */
@@ -123,8 +123,8 @@ export default function FinanceiroDashboard() {
           >
             Transferência
           </Link>
-          <a href="/api/financeiro/relatorios/fluxo-caixa/pdf" className="px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700">Exportar PDF</a>
-          <a href="/api/financeiro/relatorios/fluxo-caixa/excel" className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700">Exportar Excel</a>
+          <ExportadorFluxoCaixa />
+          
           <Link
             href="/financeiro/contas-bancarias"
             className="px-4 py-2 bg-white border border-gray-300 rounded-lg text-sm font-medium hover:bg-gray-50"
@@ -333,3 +333,75 @@ function Atalho({ href, label }: { href: string; label: string }) {
   );
 }
 
+
+function ExportadorFluxoCaixa() {
+  const [empresas, setEmpresas] = useState<{ id: number; nome: string; cnpj: string }[]>([]);
+  const [empresaId, setEmpresaId] = useState("");
+  const [mes, setMes] = useState("");
+
+  useEffect(() => {
+    fetch("/api/minhas-empresas")
+      .then((r) => r.json())
+      .then((data) => {
+        const lista = Array.isArray(data) ? data : data?.value || [];
+        setEmpresas(lista);
+        if (lista.length > 0) setEmpresaId(String(lista[0].id));
+      })
+      .catch(() => {});
+  }, []);
+
+  function baixar(formato: "pdf" | "excel") {
+    const params = new URLSearchParams();
+    if (empresaId) params.set("empresaId", empresaId);
+    if (mes) params.set("mes", mes);
+    window.open(`/api/financeiro/relatorios/fluxo-caixa/${formato}?${params.toString()}`, "_blank");
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <select
+        className="px-2 py-2 border border-gray-300 rounded-lg text-sm"
+        value={empresaId}
+        onChange={(e) => setEmpresaId(e.target.value)}
+      >
+        {empresas.map((emp) => (
+          <option key={emp.id} value={emp.id}>
+            {emp.nome}
+          </option>
+        ))}
+      </select>
+      <select
+        className="px-2 py-2 border border-gray-300 rounded-lg text-sm"
+        value={mes}
+        onChange={(e) => setMes(e.target.value)}
+      >
+        <option value="">6 meses</option>
+        {Array.from({ length: 12 }).map((_, i) => {
+          const d = new Date();
+          d.setMonth(d.getMonth() + i);
+          const valor = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+          const label = d.toLocaleDateString("pt-BR", { month: "short", year: "numeric" });
+          return (
+            <option key={valor} value={valor}>
+              {label}
+            </option>
+          );
+        })}
+      </select>
+      <button
+        onClick={() => baixar("pdf")}
+        disabled={!empresaId}
+        className="px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700 disabled:opacity-50"
+      >
+        Exportar PDF
+      </button>
+      <button
+        onClick={() => baixar("excel")}
+        disabled={!empresaId}
+        className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 disabled:opacity-50"
+      >
+        Exportar Excel
+      </button>
+    </div>
+  );
+}
