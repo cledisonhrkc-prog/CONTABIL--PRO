@@ -22,14 +22,9 @@ function formatData(data: string): string {
  * - Inclui lista detalhada das contas a receber/pagar em aberto, não só o resumo.
  */
 export async function GET(req: NextRequest) {
-  let ctx;
-  try {
-    ctx = await getAuthContext();
-  } catch (e: any) {
-    if (e instanceof AuthError) {
-      return NextResponse.json({ error: e.message }, { status: e.status });
-    }
-    return NextResponse.json({ error: e.message || "Erro interno" }, { status: 400 });
+  const usuario = await usuarioAtual();
+  if (!usuario) {
+    return NextResponse.json({ error: "Não autenticado." }, { status: 401 });
   }
 
   try {
@@ -37,19 +32,31 @@ export async function GET(req: NextRequest) {
     const mesFiltro = searchParams.get("mes");
     const empresaIdParam = searchParams.get("empresaId");
 
-    let empresaId = ctx.empresaId;
+    let empresaId: number;
     if (empresaIdParam) {
+      // Empresa veio explícita na URL (tela de exportação) — valida
+      // permissão, sem exigir que essa empresa também esteja selecionada
+      // na sessão (senão a própria função de "escolher outra empresa pra
+      // exportar" ficaria impossível de usar).
       const solicitado = Number(empresaIdParam);
-      const usuario = await usuarioAtual();
-      if (!usuario) {
-        return NextResponse.json({ error: "Não autenticado." }, { status: 401 });
-      }
       const permitidos = await empresasPermitidasIds(usuario);
       const permitido = permitidos === null || permitidos.includes(solicitado);
       if (!permitido) {
         return NextResponse.json({ error: "Você não tem permissão para esta empresa." }, { status: 403 });
       }
       empresaId = solicitado;
+    } else {
+      // Sem parâmetro explícito -> exige a empresa da sessão (mesma regra
+      // de sempre: o financeiro nunca escolhe empresa sozinho).
+      try {
+        const ctx = await getAuthContext();
+        empresaId = ctx.empresaId;
+      } catch (e: any) {
+        if (e instanceof AuthError) {
+          return NextResponse.json({ error: e.message }, { status: e.status });
+        }
+        throw e;
+      }
     }
 
     const empresaResult = await db.execute(sql`SELECT nome, cnpj FROM empresas WHERE id = ${empresaId}`);
