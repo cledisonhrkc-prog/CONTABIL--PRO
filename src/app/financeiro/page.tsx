@@ -1,6 +1,6 @@
 /**
  * Dashboard Financeiro Completo
- * Contábil Pro — Módulo Financeiro
+ * ContÃ¡bil Pro â€” MÃ³dulo Financeiro
  */
 
 "use client";
@@ -89,7 +89,7 @@ export default function FinanceiroDashboard() {
     return (
       <div className="flex items-center justify-center min-h-[60vh] p-6">
         <div className="max-w-md text-center bg-amber-50 border border-amber-200 rounded-xl p-6">
-          <p className="text-amber-800 font-medium mb-2">Não foi possível carregar o financeiro</p>
+          <p className="text-amber-800 font-medium mb-2">NÃ£o foi possÃ­vel carregar o financeiro</p>
           <p className="text-sm text-amber-700 mb-4">{erro}</p>
           <Link
             href="/"
@@ -108,20 +108,20 @@ export default function FinanceiroDashboard() {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Financeiro</h1>
-          <p className="text-sm text-gray-500">Visão completa de caixa, contas e fluxo</p>
+          <p className="text-sm text-gray-500">VisÃ£o completa de caixa, contas e fluxo</p>
         </div>
         <div className="flex flex-wrap gap-2">
           <Link
             href="/financeiro/lancamentos/novo"
             className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700"
           >
-            + Lançamento
+            + LanÃ§amento
           </Link>
           <Link
             href="/financeiro/transferencias"
             className="px-4 py-2 bg-white border border-gray-300 rounded-lg text-sm font-medium hover:bg-gray-50"
           >
-            Transferência
+            TransferÃªncia
           </Link>
           <ExportadorFluxoCaixa />
           
@@ -129,7 +129,7 @@ export default function FinanceiroDashboard() {
             href="/financeiro/contas-bancarias"
             className="px-4 py-2 bg-white border border-gray-300 rounded-lg text-sm font-medium hover:bg-gray-50"
           >
-            Contas Bancárias
+            Contas BancÃ¡rias
           </Link>
         </div>
       </div>
@@ -137,7 +137,7 @@ export default function FinanceiroDashboard() {
       {/* Cards principais */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <Card
-          titulo="Saldo Bancário"
+          titulo="Saldo BancÃ¡rio"
           valor={formatCurrency(saldos?.total || 0)}
           subtitulo={`${saldos?.porConta?.length || 0} conta(s)`}
           cor="blue"
@@ -149,7 +149,7 @@ export default function FinanceiroDashboard() {
           subtitulo={
             resumo?.receber.vencido
               ? `Vencido: ${formatCurrency(resumo.receber.vencido)}`
-              : `${resumo?.receber.quantidade || 0} títulos`
+              : `${resumo?.receber.quantidade || 0} tÃ­tulos`
           }
           cor="green"
           href="/financeiro/contas-receber"
@@ -161,21 +161,21 @@ export default function FinanceiroDashboard() {
           subtitulo={
             resumo?.pagar.vencido
               ? `Vencido: ${formatCurrency(resumo.pagar.vencido)}`
-              : `${resumo?.pagar.quantidade || 0} títulos`
+              : `${resumo?.pagar.quantidade || 0} tÃ­tulos`
           }
           cor="red"
           href="/financeiro/contas-pagar"
           alerta={!!resumo?.pagar.vencido}
         />
         <Card
-          titulo="Resultado Projetado (mês)"
+          titulo="Resultado Projetado (mÃªs)"
           valor={formatCurrency(
             (fluxo[0]?.entradasConfirmadas || 0) +
               (fluxo[0]?.entradasProjetadas || 0) -
               (fluxo[0]?.saidasConfirmadas || 0) -
               (fluxo[0]?.saidasProjetadas || 0)
           )}
-          subtitulo="Entradas − Saídas"
+          subtitulo="Entradas âˆ’ SaÃ­das"
           cor="purple"
           href="/financeiro/fluxo-caixa"
         />
@@ -222,16 +222,16 @@ export default function FinanceiroDashboard() {
             href="/financeiro/fluxo-caixa"
             className="text-sm text-blue-600 hover:underline"
           >
-            Ver completo →
+            Ver completo â†’
           </Link>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b text-left text-gray-500">
-                <th className="pb-2 pr-4">Mês</th>
+                <th className="pb-2 pr-4">MÃªs</th>
                 <th className="pb-2 pr-4 text-right">Entradas</th>
-                <th className="pb-2 pr-4 text-right">Saídas</th>
+                <th className="pb-2 pr-4 text-right">SaÃ­das</th>
                 <th className="pb-2 pr-4 text-right">Projetado</th>
                 <th className="pb-2 text-right">Saldo Final</th>
               </tr>
@@ -265,15 +265,15 @@ export default function FinanceiroDashboard() {
         </div>
       </div>
 
-      {/* Atalhos rápidos */}
+      {/* Atalhos rÃ¡pidos */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <Atalho href="/financeiro/contas-receber" label="Contas a Receber" />
         <Atalho href="/financeiro/contas-pagar" label="Contas a Pagar" />
-        <Atalho href="/financeiro/lancamentos" label="Lançamentos" />
-        <Atalho href="/financeiro/conciliacao" label="Conciliação" />
+        <Atalho href="/financeiro/lancamentos" label="LanÃ§amentos" />
+        <Atalho href="/financeiro/conciliacao" label="ConciliaÃ§Ã£o" />
         <Atalho href="/financeiro/categorias" label="Categorias" />
-        <Atalho href="/financeiro/contas-bancarias" label="Contas Bancárias" />
-        <Atalho href="/financeiro/transferencias" label="Transferências" />
+        <Atalho href="/financeiro/contas-bancarias" label="Contas BancÃ¡rias" />
+        <Atalho href="/financeiro/transferencias" label="TransferÃªncias" />
         <Atalho href="/financeiro/fluxo-caixa" label="Fluxo de Caixa" />
       </div>
     </div>
@@ -338,40 +338,62 @@ function ExportadorFluxoCaixa() {
   const [empresas, setEmpresas] = useState<{ id: number; nome: string; cnpj: string }[]>([]);
   const [empresaId, setEmpresaId] = useState("");
   const [mes, setMes] = useState("");
+  const [carregando, setCarregando] = useState(true);
+  const [erroCarregamento, setErroCarregamento] = useState("");
 
   useEffect(() => {
     fetch("/api/minhas-empresas")
-      .then((r) => r.json())
+      .then((r) => {
+        if (!r.ok) throw new Error(`Erro ${r.status} ao buscar empresas`);
+        return r.json();
+      })
       .then((data) => {
-        const lista = Array.isArray(data) ? data : data?.value || [];
+        const lista = Array.isArray(data) ? data : data?.value || data?.empresas || data?.data || [];
+        if (lista.length === 0) {
+          setErroCarregamento("Nenhuma empresa encontrada.");
+        }
         setEmpresas(lista);
         if (lista.length > 0) setEmpresaId(String(lista[0].id));
       })
-      .catch(() => {});
+      .catch((e) => setErroCarregamento(e.message || "Erro ao carregar empresas."))
+      .finally(() => setCarregando(false));
   }, []);
 
   function baixar(formato: "pdf" | "excel") {
+    if (!empresaId) {
+      alert("Selecione uma empresa antes de exportar.");
+      return;
+    }
     const params = new URLSearchParams();
-    if (empresaId) params.set("empresaId", empresaId);
+    params.set("empresaId", empresaId);
     if (mes) params.set("mes", mes);
     window.open(`/api/financeiro/relatorios/fluxo-caixa/${formato}?${params.toString()}`, "_blank");
+  }
+
+  if (carregando) {
+    return <span className="text-sm text-gray-500 px-2">Carregando empresas...</span>;
+  }
+
+  if (erroCarregamento) {
+    return <span className="text-sm text-red-600 px-2">{erroCarregamento}</span>;
   }
 
   return (
     <div className="flex flex-wrap items-center gap-2">
       <select
-        className="px-2 py-2 border border-gray-300 rounded-lg text-sm"
+        className="min-w-[220px] px-2 py-2 border border-gray-300 rounded-lg text-sm bg-white text-gray-900"
         value={empresaId}
         onChange={(e) => setEmpresaId(e.target.value)}
       >
+        {empresas.length === 0 && <option value="">Nenhuma empresa</option>}
         {empresas.map((emp) => (
           <option key={emp.id} value={emp.id}>
-            {emp.nome}
+            {emp.nome || `Empresa #${emp.id}`}
           </option>
         ))}
       </select>
       <select
-        className="px-2 py-2 border border-gray-300 rounded-lg text-sm"
+        className="min-w-[140px] px-2 py-2 border border-gray-300 rounded-lg text-sm bg-white text-gray-900"
         value={mes}
         onChange={(e) => setMes(e.target.value)}
       >
