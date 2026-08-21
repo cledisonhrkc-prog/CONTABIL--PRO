@@ -115,6 +115,11 @@ export default function DPDashboard() {
         <Atalho href="/dp/colaboradores/novo" label="Novo Colaborador" />
         <Atalho href="/dp/pro-labore" label="Pró-labore" />
         <Atalho href="/dp/pro-labore/novo" label="Novo Pagamento" />
+        <Atalho href="/dp/folha" label="Processar Folha" />
+        <Atalho href="/dp/rubricas" label="Rubricas" />
+        <Atalho href="/dp/ferias" label="Férias" />
+        <Atalho href="/dp/decimo-terceiro" label="13º Salário" />
+        <Atalho href="/dp/rescisoes" label="Rescisões" />
       </div>
 
       <Card>
