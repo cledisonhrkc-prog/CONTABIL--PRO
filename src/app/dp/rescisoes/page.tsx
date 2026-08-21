@@ -82,24 +82,25 @@ export default function RescisoesPage() {
                 <TableHead className="text-right">Descontos</TableHead>
                 <TableHead className="text-right">Líquido</TableHead>
                 <TableHead>Status</TableHead>
+                <TableHead></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {erro ? (
                 <TableRow>
-                  <TableCell colSpan={7} className="text-center py-10 text-amber-700 bg-amber-50">
+                  <TableCell colSpan={8} className="text-center py-10 text-amber-700 bg-amber-50">
                     {erro}
                   </TableCell>
                 </TableRow>
               ) : loading ? (
                 <TableRow>
-                  <TableCell colSpan={7} className="text-center py-10 text-muted-foreground">
+                  <TableCell colSpan={8} className="text-center py-10 text-muted-foreground">
                     Carregando...
                   </TableCell>
                 </TableRow>
               ) : rescisoes.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={7} className="text-center py-10 text-muted-foreground">
+                  <TableCell colSpan={8} className="text-center py-10 text-muted-foreground">
                     Nenhuma rescisão calculada ainda.
                   </TableCell>
                 </TableRow>
@@ -114,6 +115,13 @@ export default function RescisoesPage() {
                     <TableCell className="text-right font-medium">R$ {Number(r.total_liquido).toFixed(2)}</TableCell>
                     <TableCell>
                       <Badge>{r.status}</Badge>
+                    </TableCell>
+                    <TableCell>
+                      <Button size="sm" variant="ghost" asChild>
+                        <a href={`/api/dp/pdf?tipo=rescisao&id=${r.id}`} target="_blank" rel="noopener noreferrer">
+                          PDF
+                        </a>
+                      </Button>
                     </TableCell>
                   </TableRow>
                 ))

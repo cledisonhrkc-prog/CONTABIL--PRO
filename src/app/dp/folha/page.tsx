@@ -53,19 +53,21 @@ export default function ProcessarFolhaPage() {
   const [erro, setErro] = useState("");
   const [holerites, setHolerites] = useState<Holerite[]>([]);
   const [loadingHolerites, setLoadingHolerites] = useState(true);
+  const [filtroHolerite, setFiltroHolerite] = useState("");
 
   useEffect(() => {
     fetch("/api/dp/vinculos?tipoVinculo=CLT")
       .then((r) => r.json())
       .then((data) => setClts(Array.isArray(data) ? data : []))
       .catch(() => {});
-    carregarHolerites();
   }, []);
 
   async function carregarHolerites() {
     setLoadingHolerites(true);
     try {
-      const res = await fetch("/api/dp/folha/holerites");
+      const params = new URLSearchParams();
+      if (filtroHolerite) params.set("competencia", filtroHolerite);
+      const res = await fetch(`/api/dp/folha/holerites?${params}`);
       const data = await res.json();
       setHolerites(Array.isArray(data) ? data : []);
     } catch {
@@ -74,6 +76,11 @@ export default function ProcessarFolhaPage() {
       setLoadingHolerites(false);
     }
   }
+
+  useEffect(() => {
+    carregarHolerites();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filtroHolerite]);
 
   async function processarIndividual() {
     if (!vinculoId) {
@@ -185,8 +192,21 @@ export default function ProcessarFolhaPage() {
       </Card>
 
       <Card>
-        <CardHeader>
+        <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle>Holerites processados</CardTitle>
+          <div className="flex items-center gap-2">
+            <input
+              type="month"
+              className="border rounded-md px-2 py-1 text-sm"
+              value={filtroHolerite}
+              onChange={(e) => setFiltroHolerite(e.target.value)}
+            />
+            {filtroHolerite && (
+              <Button size="sm" variant="ghost" onClick={() => setFiltroHolerite("")}>
+                Limpar
+              </Button>
+            )}
+          </div>
         </CardHeader>
         <CardContent className="p-0">
           <Table>
@@ -199,18 +219,19 @@ export default function ProcessarFolhaPage() {
                 <TableHead className="text-right">IRRF</TableHead>
                 <TableHead className="text-right">FGTS</TableHead>
                 <TableHead className="text-right">Líquido</TableHead>
+                <TableHead></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {loadingHolerites ? (
                 <TableRow>
-                  <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
+                  <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
                     Carregando...
                   </TableCell>
                 </TableRow>
               ) : holerites.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
+                  <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
                     Nenhum holerite processado ainda.
                   </TableCell>
                 </TableRow>
@@ -224,6 +245,13 @@ export default function ProcessarFolhaPage() {
                     <TableCell className="text-right">R$ {Number(h.valor_irrf).toFixed(2)}</TableCell>
                     <TableCell className="text-right">R$ {Number(h.fgts_mes).toFixed(2)}</TableCell>
                     <TableCell className="text-right font-medium">R$ {Number(h.total_liquido).toFixed(2)}</TableCell>
+                    <TableCell>
+                      <Button size="sm" variant="ghost" asChild>
+                        <a href={`/api/dp/pdf?tipo=holerite&id=${h.id}`} target="_blank" rel="noopener noreferrer">
+                          PDF
+                        </a>
+                      </Button>
+                    </TableCell>
                   </TableRow>
                 ))
               )}

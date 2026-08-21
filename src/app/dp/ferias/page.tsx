@@ -218,18 +218,19 @@ export default function FeriasPage() {
                 <TableHead>Abono</TableHead>
                 <TableHead className="text-right">Bruto</TableHead>
                 <TableHead className="text-right">Líquido</TableHead>
+                <TableHead></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {loading ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
+                  <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
                     Carregando...
                   </TableCell>
                 </TableRow>
               ) : lista.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
+                  <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
                     Nenhuma férias calculada ainda.
                   </TableCell>
                 </TableRow>
@@ -244,6 +245,13 @@ export default function FeriasPage() {
                     <TableCell>{f.abono_pecuniario ? <Badge variant="secondary">Sim</Badge> : "—"}</TableCell>
                     <TableCell className="text-right">R$ {Number(f.total_bruto).toFixed(2)}</TableCell>
                     <TableCell className="text-right font-medium">R$ {Number(f.total_liquido).toFixed(2)}</TableCell>
+                    <TableCell>
+                      <Button size="sm" variant="ghost" asChild>
+                        <a href={`/api/dp/pdf?tipo=ferias&id=${f.id}`} target="_blank" rel="noopener noreferrer">
+                          PDF
+                        </a>
+                      </Button>
+                    </TableCell>
                   </TableRow>
                 ))
               )}

@@ -39,16 +39,20 @@ export default function ProLaborePage() {
   const [loading, setLoading] = useState(true);
   const [erro, setErro] = useState<string | null>(null);
   const [processandoId, setProcessandoId] = useState<number | null>(null);
+  const [filtroCompetencia, setFiltroCompetencia] = useState("");
 
   useEffect(() => {
     load();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filtroCompetencia]);
 
   async function load() {
     setLoading(true);
     setErro(null);
     try {
-      const res = await fetch("/api/dp/pro-labore");
+      const params = new URLSearchParams();
+      if (filtroCompetencia) params.set("competencia", filtroCompetencia);
+      const res = await fetch(`/api/dp/pro-labore?${params}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || `Erro ao carregar (${res.status})`);
       setPagamentos(Array.isArray(data) ? data : []);
@@ -116,6 +120,21 @@ export default function ProLaborePage() {
         </div>
       </div>
 
+      <div className="flex items-center gap-2">
+        <label className="text-sm text-muted-foreground">Filtrar por competência:</label>
+        <input
+          type="month"
+          className="border rounded-md px-2 py-1 text-sm"
+          value={filtroCompetencia}
+          onChange={(e) => setFiltroCompetencia(e.target.value)}
+        />
+        {filtroCompetencia && (
+          <Button size="sm" variant="ghost" onClick={() => setFiltroCompetencia("")}>
+            Limpar
+          </Button>
+        )}
+      </div>
+
       <Card>
         <CardContent className="p-0">
           <Table>
@@ -161,26 +180,33 @@ export default function ProLaborePage() {
                       <Badge variant={STATUS_VARIANT[p.status] || "secondary"}>{p.status}</Badge>
                     </TableCell>
                     <TableCell>
-                      {p.status === "PENDENTE" && (
-                        <div className="flex gap-1">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            disabled={processandoId === p.id}
-                            onClick={() => marcarPago(p.id)}
-                          >
-                            {processandoId === p.id ? "..." : "Marcar pago"}
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="destructive"
-                            disabled={processandoId === p.id}
-                            onClick={() => cancelar(p.id)}
-                          >
-                            Cancelar
-                          </Button>
-                        </div>
-                      )}
+                      <div className="flex gap-1 items-center">
+                        <Button size="sm" variant="ghost" asChild>
+                          <a href={`/api/dp/pdf?tipo=prolabore&id=${p.id}`} target="_blank" rel="noopener noreferrer">
+                            PDF
+                          </a>
+                        </Button>
+                        {p.status === "PENDENTE" && (
+                          <>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              disabled={processandoId === p.id}
+                              onClick={() => marcarPago(p.id)}
+                            >
+                              {processandoId === p.id ? "..." : "Marcar pago"}
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="destructive"
+                              disabled={processandoId === p.id}
+                              onClick={() => cancelar(p.id)}
+                            >
+                              Cancelar
+                            </Button>
+                          </>
+                        )}
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))
