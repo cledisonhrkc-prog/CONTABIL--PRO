@@ -776,3 +776,192 @@ export async function listarRescisoes(empresaId: number) {
   `);
   return r.rows;
 }
+
+// ============================================================
+// FÉRIAS
+// ============================================================
+export async function calcularFerias(
+  empresaId: number,
+  dados: {
+    vinculoId: number;
+    periodoAquisitivoInicio: string;
+    periodoAquisitivoFim: string;
+    dataInicioGozo: string;
+    dataFimGozo: string;
+    diasGozo: number;
+    abonoPecuniario?: boolean;
+    diasAbono?: number;
+  }
+) {
+  const vinculo = await db.execute(sql`
+    SELECT id, colaborador_id, salario_base FROM colaborador_vinculos
+    WHERE id = ${dados.vinculoId} AND empresa_id = ${empresaId} AND is_ativo = true AND deleted_at IS NULL
+  `);
+  const v = vinculo.rows[0] as any;
+  if (!v) throw new Error("Vínculo ativo não encontrado nesta empresa.");
+
+  const salario = Number(v.salario_base);
+  if (!salario || salario <= 0) throw new Error("Vínculo sem salário base cadastrado.");
+
+  const valorDia = salario / 30;
+  const valorFerias = Number((valorDia * dados.diasGozo).toFixed(2));
+  const valorTerco = Number((valorFerias / 3).toFixed(2));
+
+  const abono = dados.abonoPecuniario ?? false;
+  const diasAbono = dados.diasAbono ?? 0;
+  const valorAbono = abono ? Number((valorDia * diasAbono).toFixed(2)) : 0;
+  const valorTercoAbono = abono ? Number((valorAbono / 3).toFixed(2)) : 0;
+
+  // Abono pecuniário é isento de INSS/IRRF (natureza indenizatória) —
+  // igual ao aviso prévio na rescisão. Só férias+1/3 sofrem desconto.
+  const baseInssIrrf = valorFerias + valorTerco;
+  const inssResult = await db.execute(sql`SELECT dp_calcular_inss(${baseInssIrrf}::numeric, CURRENT_DATE) AS v`);
+  const valorInss = Number((inssResult.rows[0] as any).v);
+  const irrfResult = await db.execute(sql`
+    SELECT dp_calcular_irrf(${baseInssIrrf - valorInss}::numeric, 0, CURRENT_DATE, false) AS v
+  `);
+  const valorIrrf = Number((irrfResult.rows[0] as any).v);
+
+  const totalBruto = Number((valorFerias + valorTerco + valorAbono + valorTercoAbono).toFixed(2));
+  const totalLiquido = Number((totalBruto - valorInss - valorIrrf).toFixed(2));
+
+  const r = await db.execute(sql`
+    INSERT INTO dp_ferias (
+      empresa_id, colaborador_id, vinculo_id, periodo_aquisitivo_inicio, periodo_aquisitivo_fim,
+      data_inicio_gozo, data_fim_gozo, dias_gozo, abono_pecuniario, dias_abono,
+      valor_ferias, valor_terco, valor_abono, valor_terco_abono, valor_inss, valor_irrf,
+      total_bruto, total_liquido, status
+    ) VALUES (
+      ${empresaId}, ${v.colaborador_id}, ${dados.vinculoId}, ${dados.periodoAquisitivoInicio}, ${dados.periodoAquisitivoFim},
+      ${dados.dataInicioGozo}, ${dados.dataFimGozo}, ${dados.diasGozo}, ${abono}, ${diasAbono},
+      ${valorFerias}, ${valorTerco}, ${valorAbono}, ${valorTercoAbono}, ${valorInss}, ${valorIrrf},
+      ${totalBruto}, ${totalLiquido}, 'CALCULADA'
+    )
+    RETURNING *
+  `);
+  return r.rows[0];
+}
+
+export async function listarFerias(empresaId: number) {
+  const r = await db.execute(sql`
+    SELECT f.*, c.nome_completo AS colaborador_nome
+    FROM dp_ferias f
+    JOIN colaboradores c ON c.id = f.colaborador_id
+    WHERE f.empresa_id = ${empresaId}
+    ORDER BY f.data_inicio_gozo DESC
+  `);
+  return r.rows;
+}
+
+// ============================================================
+// 13º SALÁRIO
+// ============================================================
+export async function calcularDecimoTerceiro(
+  empresaId: number,
+  dados: { vinculoId: number; ano: number; parcela: 1 | 2 }
+) {
+  const vinculo = await db.execute(sql`
+    SELECT id, colaborador_id, salario_base FROM colaborador_vinculos
+    WHERE id = ${dados.vinculoId} AND empresa_id = ${empresaId} AND is_ativo = true AND deleted_at IS NULL
+  `);
+  const v = vinculo.rows[0] as any;
+  if (!v) throw new Error("Vínculo ativo não encontrado nesta empresa.");
+
+  const salario = Number(v.salario_base);
+  if (!salario || salario <= 0) throw new Error("Vínculo sem salário base cadastrado.");
+
+  let valorParcela: number, valorInss = 0, valorIrrf = 0, valorLiquido: number;
+
+  if (dados.parcela === 1) {
+    // 1ª parcela: 50% do salário, sem desconto (praxe/CLT)
+    valorParcela = Number((salario / 2).toFixed(2));
+    valorLiquido = valorParcela;
+  } else {
+    // 2ª parcela: INSS/IRRF incidem sobre o TOTAL do 13º (não sobre a
+    // parcela), descontados de uma vez só aqui.
+    const inssResult = await db.execute(sql`SELECT dp_calcular_inss(${salario}::numeric, CURRENT_DATE) AS v`);
+    valorInss = Number((inssResult.rows[0] as any).v);
+    const irrfResult = await db.execute(sql`
+      SELECT dp_calcular_irrf(${salario - valorInss}::numeric, 0, CURRENT_DATE, false) AS v
+    `);
+    valorIrrf = Number((irrfResult.rows[0] as any).v);
+    valorParcela = Number((salario / 2).toFixed(2));
+    valorLiquido = Number((valorParcela - valorInss - valorIrrf).toFixed(2));
+  }
+
+  const r = await db.execute(sql`
+    INSERT INTO dp_decimo_terceiro (
+      empresa_id, colaborador_id, vinculo_id, ano, parcela, valor_bruto_total,
+      valor_parcela, valor_inss, valor_irrf, valor_liquido, status
+    ) VALUES (
+      ${empresaId}, ${v.colaborador_id}, ${dados.vinculoId}, ${dados.ano}, ${dados.parcela}, ${salario},
+      ${valorParcela}, ${valorInss}, ${valorIrrf}, ${valorLiquido}, 'CALCULADA'
+    )
+    ON CONFLICT (vinculo_id, ano, parcela) DO UPDATE SET
+      valor_parcela = EXCLUDED.valor_parcela,
+      valor_inss = EXCLUDED.valor_inss,
+      valor_irrf = EXCLUDED.valor_irrf,
+      valor_liquido = EXCLUDED.valor_liquido
+    RETURNING *
+  `);
+  return r.rows[0];
+}
+
+export async function listarDecimoTerceiro(empresaId: number, opts: { ano?: number } = {}) {
+  const r = await db.execute(sql`
+    SELECT d.*, c.nome_completo AS colaborador_nome
+    FROM dp_decimo_terceiro d
+    JOIN colaboradores c ON c.id = d.colaborador_id
+    WHERE d.empresa_id = ${empresaId}
+      AND (${opts.ano ?? null}::int IS NULL OR d.ano = ${opts.ano ?? null})
+    ORDER BY d.ano DESC, d.parcela, c.nome_completo
+  `);
+  return r.rows;
+}
+
+// ============================================================
+// REPROCESSAR FOLHA (usa as tabelas de INSS/IRRF corrigidas)
+// ============================================================
+export async function reprocessarFolhaCLT(empresaId: number) {
+  const holerites = await db.execute(sql`
+    SELECT id, colaborador_id, salario_base, total_proventos, total_descontos, valor_inss AS inss_antigo, valor_irrf AS irrf_antigo
+    FROM dp_holerites WHERE empresa_id = ${empresaId}
+  `);
+
+  const reprocessados: any[] = [];
+  for (const h of holerites.rows as any[]) {
+    const salarioBase = Number(h.salario_base);
+    const inssResult = await db.execute(sql`SELECT dp_calcular_inss(${salarioBase}::numeric, CURRENT_DATE) AS v`);
+    const novoInss = Number((inssResult.rows[0] as any).v);
+    const irrfResult = await db.execute(sql`
+      SELECT dp_calcular_irrf(${salarioBase - novoInss}::numeric, 0, CURRENT_DATE, false) AS v
+    `);
+    const novoIrrf = Number((irrfResult.rows[0] as any).v);
+
+    if (Math.abs(novoInss - Number(h.inss_antigo)) < 0.01 && Math.abs(novoIrrf - Number(h.irrf_antigo)) < 0.01) {
+      continue; // já está certo
+    }
+
+    const outrosDescontos = Number(
+      (Number(h.total_descontos) - Number(h.inss_antigo) - Number(h.irrf_antigo)).toFixed(2)
+    );
+    const novoTotalDescontos = Number((outrosDescontos + novoInss + novoIrrf).toFixed(2));
+    const novoLiquido = Number((Number(h.total_proventos) - novoTotalDescontos).toFixed(2));
+
+    await db.execute(sql`
+      UPDATE dp_holerites
+      SET valor_inss = ${novoInss}, valor_irrf = ${novoIrrf}, total_descontos = ${novoTotalDescontos}, total_liquido = ${novoLiquido}
+      WHERE id = ${h.id}
+    `);
+    reprocessados.push({
+      id: h.id,
+      inssAntigo: h.inss_antigo,
+      novoInss,
+      irrfAntigo: h.irrf_antigo,
+      novoIrrf,
+      novoLiquido,
+    });
+  }
+
+  return { reprocessados: reprocessados.length, detalhes: reprocessados };
+}
