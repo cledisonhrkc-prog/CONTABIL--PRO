@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
@@ -46,6 +46,41 @@ export default function Sidebar() {
   const path = usePathname();
   const router = useRouter();
   const [saindo, setSaindo] = useState(false);
+  const [empresas, setEmpresas] = useState<{ id: number; nome: string; cnpj: string }[]>([]);
+  const [empresaId, setEmpresaId] = useState("");
+  const [trocando, setTrocando] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/minhas-empresas")
+      .then((r) => r.json())
+      .then((data) => {
+        const lista = Array.isArray(data) ? data : data?.value || data?.empresas || data?.data || [];
+        setEmpresas(lista);
+      })
+      .catch(() => {});
+    // Lê a empresa já selecionada, se houver, direto do cookie visível no client
+    // (empresa_ativa_id não é httpOnly no seu sistema, então dá pra ler assim)
+    const match = document.cookie.match(/empresa_ativa_id=([^;]+)/);
+    if (match) setEmpresaId(match[1]);
+  }, []);
+
+  async function trocarEmpresa(novoId: string) {
+    setTrocando(true);
+    try {
+      const res = await fetch("/api/selecionar-empresa", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ empresa_id: Number(novoId) }),
+      });
+      if (!res.ok) throw new Error("Erro ao selecionar empresa");
+      setEmpresaId(novoId);
+      router.refresh();
+    } catch (e) {
+      alert("Erro ao trocar de empresa. Tenta de novo.");
+    } finally {
+      setTrocando(false);
+    }
+  }
 
   async function handleLogout() {
     setSaindo(true);
@@ -71,6 +106,25 @@ export default function Sidebar() {
             <div className="text-[10px] text-slate-500">Sistema Contábil Completo</div>
           </div>
         </div>
+      </div>
+
+      <div className="px-4 py-3 border-b border-slate-200">
+        <label className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold block mb-1.5">
+          Cliente
+        </label>
+        <select
+          className="w-full text-sm border border-slate-200 rounded-lg px-2.5 py-2 bg-slate-50 text-slate-700 disabled:opacity-60"
+          value={empresaId}
+          onChange={(e) => trocarEmpresa(e.target.value)}
+          disabled={trocando}
+        >
+          <option value="">Selecionar empresa...</option>
+          {empresas.map((emp) => (
+            <option key={emp.id} value={emp.id}>
+              {emp.nome}
+            </option>
+          ))}
+        </select>
       </div>
 
       <nav className="flex-1 overflow-y-auto px-2.5 py-4">
