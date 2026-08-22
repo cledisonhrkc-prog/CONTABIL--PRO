@@ -8,7 +8,31 @@ import {
   statusLabel,
   statusColor,
 } from "@/utils/format";
-import { Plus, ArrowLeftRight, Landmark, ArrowRight } from "lucide-react";
+import {
+  Wallet,
+  ArrowDownCircle,
+  ArrowUpCircle,
+  TrendingUp,
+  Plus,
+  ArrowLeftRight,
+  Landmark,
+  FileText,
+  Receipt,
+  ClipboardList,
+  RefreshCw,
+  Clock,
+} from "lucide-react";
+import {
+  ResponsiveContainer,
+  ComposedChart,
+  Bar,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+} from "recharts";
 
 interface Resumo {
   receber: { total: number; vencido: number; aVencer: number; quantidade: number };
@@ -33,10 +57,29 @@ interface FluxoMes {
   saldoFinal: number;
 }
 
+interface Movimentacao {
+  id: number;
+  participante: string;
+  valor: number;
+  valorPago?: number;
+  vencimento: string;
+  status: string;
+  tipo: "receber" | "pagar";
+}
+
+const STATUS_BADGE: Record<string, string> = {
+  ABERTO: "bg-amber-50 text-amber-700",
+  PARCIAL: "bg-blue-50 text-blue-700",
+  PAGO: "bg-emerald-50 text-emerald-700",
+  RECEBIDO: "bg-emerald-50 text-emerald-700",
+  VENCIDO: "bg-red-50 text-red-700",
+};
+
 export default function FinanceiroDashboard() {
   const [resumo, setResumo] = useState<Resumo | null>(null);
   const [saldos, setSaldos] = useState<{ total: number; porConta: SaldoConta[] } | null>(null);
   const [fluxo, setFluxo] = useState<FluxoMes[]>([]);
+  const [movimentacoes, setMovimentacoes] = useState<Movimentacao[]>([]);
   const [loading, setLoading] = useState(true);
   const [erro, setErro] = useState<string | null>(null);
 
@@ -52,14 +95,28 @@ export default function FinanceiroDashboard() {
 
     async function load() {
       try {
-        const [r1, r2, r3] = await Promise.all([
+        const [r1, r2, r3, receber, pagar] = await Promise.all([
           fetchJson("/api/financeiro/resumo"),
           fetchJson("/api/financeiro/saldos"),
           fetchJson("/api/financeiro/fluxo-caixa?meses=6"),
+          fetchJson("/api/financeiro/contas-receber?limit=5").catch(() => []),
+          fetchJson("/api/financeiro/contas-pagar?limit=5").catch(() => []),
         ]);
         setResumo(r1);
         setSaldos(r2);
         setFluxo(r3);
+
+        // Combina as contas a receber/pagar mais recentes como "movimentações"
+        // — dado real do sistema, não inventado.
+        const listaReceber = Array.isArray(receber) ? receber : receber?.value || [];
+        const listaPagar = Array.isArray(pagar) ? pagar : pagar?.value || [];
+        const combinado: Movimentacao[] = [
+          ...listaReceber.map((c: any) => ({ ...c, tipo: "receber" as const })),
+          ...listaPagar.map((c: any) => ({ ...c, tipo: "pagar" as const })),
+        ]
+          .sort((a, b) => new Date(b.vencimento).getTime() - new Date(a.vencimento).getTime())
+          .slice(0, 5);
+        setMovimentacoes(combinado);
       } catch (e: any) {
         console.error(e);
         setErro(e.message || "Erro ao carregar dados financeiros.");
@@ -101,193 +158,256 @@ export default function FinanceiroDashboard() {
     (fluxo[0]?.saidasConfirmadas || 0) -
     (fluxo[0]?.saidasProjetadas || 0);
 
-  const posicaoLiquida = (resumo?.receber.total || 0) - (resumo?.pagar.total || 0);
+  const totalEntradas6m = fluxo.reduce((s, m) => s + m.entradasConfirmadas + m.entradasProjetadas, 0);
+  const totalSaidas6m = fluxo.reduce((s, m) => s + m.saidasConfirmadas + m.saidasProjetadas, 0);
+
+  const dadosGrafico = fluxo.map((m) => ({
+    mes: m.mes.replace(". de ", "/"),
+    Entradas: m.entradasConfirmadas + m.entradasProjetadas,
+    Saídas: m.saidasConfirmadas + m.saidasProjetadas,
+    "Saldo Final": m.saldoFinal,
+  }));
 
   return (
-    <div className="p-6 space-y-6 max-w-6xl mx-auto bg-white min-h-screen -m-6">
-      {/* Header enxuto */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-2">
-        <div>
-          <h1 className="text-xl font-semibold text-slate-900 tracking-tight">Financeiro</h1>
-          <p className="text-sm text-slate-500 mt-0.5">Visão de caixa, contas e fluxo</p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Link
-            href="/financeiro/lancamentos/novo"
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 transition"
-          >
-            <Plus className="h-4 w-4" /> Lançamento
-          </Link>
-          <Link
-            href="/financeiro/transferencias"
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 border border-slate-200 text-slate-600 rounded-lg text-sm font-medium hover:bg-slate-50 transition"
-          >
-            <ArrowLeftRight className="h-4 w-4" /> Transferência
-          </Link>
-          <Link
-            href="/financeiro/contas-bancarias"
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 border border-slate-200 text-slate-600 rounded-lg text-sm font-medium hover:bg-slate-50 transition"
-          >
-            <Landmark className="h-4 w-4" /> Contas
-          </Link>
-        </div>
-      </div>
-
-      {/* Hero: o número que a pessoa veio ver — posição líquida, com contexto ao lado */}
-      <div className="rounded-2xl border border-slate-200 p-6 sm:p-8">
-        <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-6 items-end">
+    <div className="min-h-screen bg-slate-50 -m-6">
+      {/* Header com gradiente */}
+      <div className="bg-gradient-to-r from-indigo-600 to-purple-600 px-6 py-6 rounded-b-3xl shadow-lg mb-5">
+        <div className="max-w-7xl mx-auto flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
-            <p className="text-sm font-medium text-slate-500 mb-1">Posição líquida (a receber − a pagar)</p>
-            <p
-              className={`text-4xl sm:text-5xl font-semibold tracking-tight tabular-nums ${
-                posicaoLiquida >= 0 ? "text-slate-900" : "text-red-600"
-              }`}
-            >
-              {formatCurrency(posicaoLiquida)}
-            </p>
-            <p className="text-sm text-slate-400 mt-2">
-              Saldo em conta: <span className="tabular-nums font-medium text-slate-600">{formatCurrency(saldos?.total || 0)}</span>
-              {" · "}
-              {saldos?.porConta?.length || 0} conta(s) bancária(s)
-            </p>
+            <p className="text-indigo-200 text-sm font-medium">Financeiro</p>
+            <h1 className="text-white text-2xl font-bold mt-0.5">Visão completa de caixa, contas e fluxo</h1>
           </div>
-          <div className="flex gap-6 sm:gap-8 border-t sm:border-t-0 sm:border-l border-slate-100 pt-4 sm:pt-0 sm:pl-8">
-            <MiniStat
-              label="A receber"
-              value={formatCurrency(resumo?.receber.total || 0)}
-              sub={resumo?.receber.vencido ? `${formatCurrency(resumo.receber.vencido)} vencido` : undefined}
-              subTone="warn"
-            />
-            <MiniStat
-              label="A pagar"
-              value={formatCurrency(resumo?.pagar.total || 0)}
-              sub={resumo?.pagar.vencido ? `${formatCurrency(resumo.pagar.vencido)} vencido` : undefined}
-              subTone="warn"
-            />
-            <MiniStat
-              label="Projetado (mês)"
-              value={formatCurrency(resultadoMes)}
-              sub={resultadoMes >= 0 ? "positivo" : "negativo"}
-              subTone={resultadoMes >= 0 ? "good" : "bad"}
-            />
+          <div className="flex flex-wrap gap-2">
+            <Link
+              href="/financeiro/lancamentos/novo"
+              className="inline-flex items-center gap-1.5 px-4 py-2.5 bg-white text-indigo-700 rounded-xl text-sm font-semibold shadow-sm hover:bg-slate-50 transition"
+            >
+              <Plus className="h-4 w-4" /> Lançamento
+            </Link>
+            <Link
+              href="/financeiro/transferencias"
+              className="inline-flex items-center gap-1.5 px-4 py-2.5 bg-white/15 text-white rounded-xl text-sm font-semibold border border-white/20 hover:bg-white/25 transition"
+            >
+              <ArrowLeftRight className="h-4 w-4" /> Transferência
+            </Link>
+            <Link
+              href="/financeiro/contas-bancarias"
+              className="inline-flex items-center gap-1.5 px-4 py-2.5 bg-white/15 text-white rounded-xl text-sm font-semibold border border-white/20 hover:bg-white/25 transition"
+            >
+              <Landmark className="h-4 w-4" /> Contas
+            </Link>
           </div>
         </div>
       </div>
 
-      {/* Exportar relatório — discreto, não compete com o hero */}
-      <details className="group rounded-xl border border-slate-200 [&_summary::-webkit-details-marker]:hidden">
-        <summary className="flex items-center justify-between px-5 py-3.5 cursor-pointer text-sm font-medium text-slate-600 hover:text-slate-900">
-          Exportar relatório de fluxo de caixa
-          <ArrowRight className="h-4 w-4 transition group-open:rotate-90" />
-        </summary>
-        <div className="px-5 pb-5 pt-1">
-          <ExportadorFluxoCaixa />
-        </div>
-      </details>
+      <div className="max-w-7xl mx-auto px-6 pb-8 space-y-5">
+      {/* Cards de resumo — fundo colorido cheio */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <StatCard
+          icon={<Wallet className="h-5 w-5" />}
+          titulo="Saldo Bancário"
+          valor={formatCurrency(saldos?.total || 0)}
+          sub={`${saldos?.porConta?.length || 0} conta(s)`}
+          color="blue"
+        />
+        <StatCard
+          icon={<ArrowDownCircle className="h-5 w-5" />}
+          titulo="A Receber"
+          valor={formatCurrency(resumo?.receber.total || 0)}
+          sub={resumo?.receber.vencido ? `${formatCurrency(resumo.receber.vencido)} vencido` : `${resumo?.receber.quantidade || 0} títulos`}
+          color="emerald"
+          alerta={!!resumo?.receber.vencido}
+        />
+        <StatCard
+          icon={<ArrowUpCircle className="h-5 w-5" />}
+          titulo="A Pagar"
+          valor={formatCurrency(resumo?.pagar.total || 0)}
+          sub={resumo?.pagar.vencido ? `${formatCurrency(resumo.pagar.vencido)} vencido` : `${resumo?.pagar.quantidade || 0} títulos`}
+          color="red"
+          alerta={!!resumo?.pagar.vencido}
+        />
+        <StatCard
+          icon={<TrendingUp className="h-5 w-5" />}
+          titulo="Resultado (mês)"
+          valor={formatCurrency(resultadoMes)}
+          sub="Entradas − Saídas"
+          color="violet"
+        />
+      </div>
 
-      {/* Saldos por conta */}
-      {saldos && saldos.porConta.length > 0 && (
-        <div className="rounded-xl border border-slate-200 p-5">
-          <h2 className="text-sm font-semibold text-slate-900 mb-4">Saldos por conta</h2>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-            {saldos.porConta.map((c) => (
-              <div key={c.id} className="flex items-center justify-between py-2.5 px-3 rounded-lg hover:bg-slate-50 transition">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: c.cor }} />
-                  <div>
-                    <p className="text-sm text-slate-800">{c.nome}</p>
-                    <p className="text-xs text-slate-400">{c.tipo}</p>
+      {/* Grid principal: gráfico + resumo do mês | movimentações recentes */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <div className="lg:col-span-2 bg-white rounded-xl border border-slate-200 p-5">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-base font-semibold text-slate-900 flex items-center gap-2">
+              <FileText className="h-4 w-4 text-slate-400" /> Fluxo de Caixa · 6 meses
+            </h2>
+            <Link href="/financeiro/fluxo-caixa" className="text-sm text-indigo-600 hover:underline font-medium">
+              Ver completo →
+            </Link>
+          </div>
+          {dadosGrafico.length > 0 && (
+            <ResponsiveContainer width="100%" height={260}>
+              <ComposedChart data={dadosGrafico}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                <XAxis dataKey="mes" tick={{ fontSize: 12, fill: "#94a3b8" }} axisLine={false} tickLine={false} />
+                <YAxis tick={{ fontSize: 12, fill: "#94a3b8" }} axisLine={false} tickLine={false} />
+                <Tooltip formatter={(v: any) => formatCurrency(Number(v))} />
+                <Legend wrapperStyle={{ fontSize: 12 }} />
+                <Bar dataKey="Entradas" fill="#10b981" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="Saídas" fill="#ef4444" radius={[4, 4, 0, 0]} />
+                <Line type="monotone" dataKey="Saldo Final" stroke="#6366f1" strokeWidth={2.5} dot={{ r: 3 }} />
+              </ComposedChart>
+            </ResponsiveContainer>
+          )}
+
+          <div className="grid grid-cols-3 gap-3 mt-5 pt-4 border-t border-slate-100">
+            <div>
+              <p className="text-xs text-slate-400">Total de entradas</p>
+              <p className="text-sm font-semibold text-emerald-600">{formatCurrency(totalEntradas6m)}</p>
+            </div>
+            <div>
+              <p className="text-xs text-slate-400">Total de saídas</p>
+              <p className="text-sm font-semibold text-red-600">{formatCurrency(totalSaidas6m)}</p>
+            </div>
+            <div>
+              <p className="text-xs text-slate-400">Saldo projetado final</p>
+              <p className="text-sm font-semibold text-slate-900">
+                {formatCurrency(fluxo[fluxo.length - 1]?.saldoFinal || 0)}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Movimentações recentes — dado real (contas a receber/pagar mais próximas) */}
+        <div className="bg-white rounded-xl border border-slate-200 p-5">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-base font-semibold text-slate-900 flex items-center gap-2">
+              <Clock className="h-4 w-4 text-slate-400" /> Movimentações
+            </h2>
+            <Link href="/financeiro/lancamentos" className="text-sm text-indigo-600 hover:underline font-medium">
+              Ver todas
+            </Link>
+          </div>
+          {movimentacoes.length === 0 ? (
+            <p className="text-sm text-slate-400 py-6 text-center">Nenhuma movimentação recente.</p>
+          ) : (
+            <div className="space-y-1">
+              {movimentacoes.map((m) => (
+                <div key={`${m.tipo}-${m.id}`} className="flex items-center justify-between py-2.5 border-b border-slate-50 last:border-0">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div
+                      className={`h-8 w-8 rounded-lg flex items-center justify-center shrink-0 ${
+                        m.tipo === "receber" ? "bg-emerald-50 text-emerald-600" : "bg-red-50 text-red-600"
+                      }`}
+                    >
+                      {m.tipo === "receber" ? <ArrowDownCircle className="h-4 w-4" /> : <ArrowUpCircle className="h-4 w-4" />}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-slate-800 truncate">{m.participante || "—"}</p>
+                      <p className="text-xs text-slate-400">{formatDate(m.vencimento)}</p>
+                    </div>
+                  </div>
+                  <div className="text-right shrink-0 ml-2">
+                    <p className={`text-sm font-semibold ${m.tipo === "receber" ? "text-emerald-600" : "text-red-600"}`}>
+                      {m.tipo === "receber" ? "+" : "-"}
+                      {formatCurrency(m.valor)}
+                    </p>
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded ${STATUS_BADGE[m.status] || "bg-slate-50 text-slate-500"}`}>
+                      {m.status}
+                    </span>
                   </div>
                 </div>
-                <p className={`text-sm font-medium tabular-nums ${c.saldo >= 0 ? "text-slate-800" : "text-red-600"}`}>
-                  {formatCurrency(c.saldo)}
-                </p>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Fluxo de Caixa — tabela com números alinhados */}
-      <div className="rounded-xl border border-slate-200 p-5">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-sm font-semibold text-slate-900">Fluxo de caixa · 6 meses</h2>
-          <Link href="/financeiro/fluxo-caixa" className="text-sm text-indigo-600 hover:underline font-medium">
-            Ver completo
-          </Link>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-slate-100 text-left text-slate-400">
-                <th className="pb-2.5 pr-4 font-medium">Mês</th>
-                <th className="pb-2.5 pr-4 text-right font-medium">Entradas</th>
-                <th className="pb-2.5 pr-4 text-right font-medium">Saídas</th>
-                <th className="pb-2.5 pr-4 text-right font-medium">Projetado</th>
-                <th className="pb-2.5 text-right font-medium">Saldo final</th>
-              </tr>
-            </thead>
-            <tbody>
-              {fluxo.map((m, i) => (
-                <tr key={i} className="border-b border-slate-50 last:border-0">
-                  <td className="py-2.5 pr-4 text-slate-700">{m.mes}</td>
-                  <td className="py-2.5 pr-4 text-right tabular-nums text-slate-600">
-                    {formatCurrency(m.entradasConfirmadas + m.entradasProjetadas)}
-                  </td>
-                  <td className="py-2.5 pr-4 text-right tabular-nums text-slate-600">
-                    {formatCurrency(m.saidasConfirmadas + m.saidasProjetadas)}
-                  </td>
-                  <td className="py-2.5 pr-4 text-right tabular-nums text-slate-400">
-                    {formatCurrency(m.entradasProjetadas - m.saidasProjetadas)}
-                  </td>
-                  <td
-                    className={`py-2.5 text-right font-medium tabular-nums ${
-                      m.saldoFinal >= 0 ? "text-slate-900" : "text-red-600"
-                    }`}
-                  >
-                    {formatCurrency(m.saldoFinal)}
-                  </td>
-                </tr>
               ))}
-            </tbody>
-          </table>
+            </div>
+          )}
         </div>
       </div>
 
-      {/* Atalhos — texto simples, sem caixa pesada */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-2">
-        <Atalho href="/financeiro/contas-receber" label="Contas a Receber" />
-        <Atalho href="/financeiro/contas-pagar" label="Contas a Pagar" />
-        <Atalho href="/financeiro/lancamentos" label="Lançamentos" />
-        <Atalho href="/financeiro/conciliacao" label="Conciliação" />
+      {/* Exportar relatório */}
+      <div className="bg-white rounded-xl border border-slate-200 p-5">
+        <h2 className="text-sm font-semibold text-slate-900 mb-3 flex items-center gap-2">
+          <FileText className="h-4 w-4 text-slate-400" /> Exportar Relatório
+        </h2>
+        <ExportadorFluxoCaixa />
+      </div>
+
+      {/* Atalhos — cards com ícone colorido e botão */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <AtalhoCard href="/financeiro/contas-receber" icon={<Receipt className="h-5 w-5" />} label="Contas a Receber" color="emerald" />
+        <AtalhoCard href="/financeiro/contas-pagar" icon={<Wallet className="h-5 w-5" />} label="Contas a Pagar" color="red" />
+        <AtalhoCard href="/financeiro/lancamentos" icon={<ClipboardList className="h-5 w-5" />} label="Lançamentos" color="blue" />
+        <AtalhoCard href="/financeiro/conciliacao" icon={<RefreshCw className="h-5 w-5" />} label="Conciliação" color="violet" />
+      </div>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <Atalho href="/financeiro/categorias" label="Categorias" />
         <Atalho href="/financeiro/contas-bancarias" label="Contas Bancárias" />
         <Atalho href="/financeiro/transferencias" label="Transferências" />
         <Atalho href="/financeiro/fluxo-caixa" label="Fluxo de Caixa" />
       </div>
+      </div>
     </div>
   );
 }
 
-function MiniStat({
-  label,
-  value,
+const CARD_STYLE: Record<string, string> = {
+  blue: "bg-gradient-to-br from-blue-500 to-blue-600 text-white",
+  emerald: "bg-gradient-to-br from-emerald-500 to-emerald-600 text-white",
+  red: "bg-gradient-to-br from-red-500 to-red-600 text-white",
+  violet: "bg-gradient-to-br from-violet-500 to-purple-600 text-white",
+};
+
+function StatCard({
+  icon,
+  titulo,
+  valor,
   sub,
-  subTone,
+  color,
+  alerta,
 }: {
-  label: string;
-  value: string;
-  sub?: string;
-  subTone?: "good" | "bad" | "warn";
+  icon: React.ReactNode;
+  titulo: string;
+  valor: string;
+  sub: string;
+  color: "blue" | "emerald" | "red" | "violet";
+  alerta?: boolean;
 }) {
-  const subColor =
-    subTone === "good" ? "text-emerald-600" : subTone === "bad" ? "text-red-600" : "text-amber-600";
   return (
-    <div>
-      <p className="text-xs font-medium text-slate-400 whitespace-nowrap">{label}</p>
-      <p className="text-lg font-semibold text-slate-900 tabular-nums mt-0.5">{value}</p>
-      {sub && <p className={`text-xs mt-0.5 ${subColor}`}>{sub}</p>}
+    <div className={`p-5 rounded-2xl shadow-lg ${CARD_STYLE[color]}`}>
+      <div className="h-10 w-10 rounded-xl bg-white/20 flex items-center justify-center mb-3">{icon}</div>
+      <p className="text-xs font-semibold uppercase tracking-wide opacity-90">{titulo}</p>
+      <p className="text-2xl font-bold mt-1">{valor}</p>
+      <p className={`text-xs mt-1 ${alerta ? "font-semibold" : "opacity-80"}`}>{sub}</p>
     </div>
+  );
+}
+
+const ATALHO_COLOR: Record<string, string> = {
+  blue: "bg-blue-100 text-blue-600",
+  emerald: "bg-emerald-100 text-emerald-600",
+  red: "bg-red-100 text-red-600",
+  violet: "bg-violet-100 text-violet-600",
+};
+
+function AtalhoCard({
+  href,
+  icon,
+  label,
+  color,
+}: {
+  href: string;
+  icon: React.ReactNode;
+  label: string;
+  color: "blue" | "emerald" | "red" | "violet";
+}) {
+  return (
+    <Link
+      href={href}
+      className="p-4 rounded-xl border border-slate-200 bg-white hover:shadow-md transition flex flex-col items-center text-center gap-2"
+    >
+      <div className={`h-11 w-11 rounded-full ${ATALHO_COLOR[color]} flex items-center justify-center`}>{icon}</div>
+      <span className="text-sm font-medium text-slate-700">{label}</span>
+    </Link>
   );
 }
 
@@ -295,7 +415,7 @@ function Atalho({ href, label }: { href: string; label: string }) {
   return (
     <Link
       href={href}
-      className="block px-4 py-3 border border-slate-200 rounded-lg text-center text-sm text-slate-600 hover:bg-slate-50 hover:border-slate-300 transition"
+      className="block p-3 bg-white border border-slate-200 rounded-lg text-center text-sm font-medium text-slate-600 hover:bg-slate-50 hover:border-blue-300 transition"
     >
       {label}
     </Link>
@@ -381,16 +501,16 @@ function ExportadorFluxoCaixa() {
       <button
         onClick={() => baixar("pdf")}
         disabled={!empresaId}
-        className="px-4 py-2 bg-slate-900 text-white rounded-lg text-sm font-medium hover:bg-slate-800 disabled:opacity-50 transition"
+        className="px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700 disabled:opacity-50 transition"
       >
-        PDF
+        Exportar PDF
       </button>
       <button
         onClick={() => baixar("excel")}
         disabled={!empresaId}
-        className="px-4 py-2 border border-slate-200 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50 disabled:opacity-50 transition"
+        className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 disabled:opacity-50 transition"
       >
-        Excel
+        Exportar Excel
       </button>
     </div>
   );
