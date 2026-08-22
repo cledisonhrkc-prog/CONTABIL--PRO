@@ -1,7 +1,8 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
   LayoutDashboard,
   Building2,
@@ -19,6 +20,7 @@ import {
   Settings,
   Wallet,
   Users,
+  LogOut,
 } from "lucide-react";
 
 const menu: Array<{ label: string; href: string; icon: React.ElementType }> = [
@@ -42,6 +44,21 @@ const menu: Array<{ label: string; href: string; icon: React.ElementType }> = [
 
 export default function Sidebar() {
   const path = usePathname();
+  const router = useRouter();
+  const [saindo, setSaindo] = useState(false);
+
+  async function handleLogout() {
+    setSaindo(true);
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+    } catch {
+      // mesmo se der erro na chamada, ainda tenta mandar pro login
+    } finally {
+      router.push("/login");
+      router.refresh();
+    }
+  }
+
   return (
     <aside className="w-64 bg-white border-r border-slate-200 flex flex-col h-screen sticky top-0">
       <div className="px-5 py-4 border-b border-slate-200">
@@ -88,6 +105,14 @@ export default function Sidebar() {
           <span className="text-emerald-600 font-medium text-[11px]">Período Aberto</span>
         </div>
       </div>
+      <button
+        onClick={handleLogout}
+        disabled={saindo}
+        className="flex items-center gap-3 px-4 py-3 text-sm text-red-600 hover:bg-red-50 transition border-t border-slate-200 disabled:opacity-50"
+      >
+        <LogOut className="h-4 w-4" />
+        <span>{saindo ? "Saindo..." : "Sair"}</span>
+      </button>
       <div className="border-t border-slate-200 px-4 py-3 text-[10px] text-slate-400">
         v5.0.0 — SIGC
       </div>
