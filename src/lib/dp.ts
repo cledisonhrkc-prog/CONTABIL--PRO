@@ -352,6 +352,13 @@ export async function criarPagamentoProLabore(empresaId: number, dados: ProLabor
   valorIrrf = Number(valorIrrf.toFixed(2));
   const valorLiquido = Number((dados.valorBruto - valorInss - valorIrrf).toFixed(2));
 
+  if (valorLiquido < 0) {
+    throw new Error(
+      `Não é possível lançar: INSS (R$ ${valorInss.toFixed(2)}) + IRRF (R$ ${valorIrrf.toFixed(2)}) ` +
+        `ultrapassam o valor bruto (R$ ${dados.valorBruto.toFixed(2)}), resultando em líquido negativo.`
+    );
+  }
+
   const r = await db.execute(sql`
     INSERT INTO pro_labore_pagamentos (
       empresa_id, vinculo_id, colaborador_id, competencia, valor_bruto,
@@ -563,6 +570,17 @@ export async function processarFolhaCLT(
   totalProventos = Number(totalProventos.toFixed(2));
   totalDescontos = Number(totalDescontos.toFixed(2));
   const totalLiquido = Number((totalProventos - totalDescontos).toFixed(2));
+
+  // Proteção contra líquido negativo — nunca deixa gravar um holerite onde
+  // os descontos ultrapassam os proventos. Isso é sempre inválido, não
+  // importa a combinação de rubricas que causou.
+  if (totalLiquido < 0) {
+    throw new Error(
+      `Não é possível processar: os descontos (R$ ${totalDescontos.toFixed(2)}) são maiores que os ` +
+        `proventos (R$ ${totalProventos.toFixed(2)}), o que resultaria em líquido negativo de ` +
+        `R$ ${totalLiquido.toFixed(2)}. Revise as rubricas de desconto cadastradas para este colaborador.`
+    );
+  }
 
   const r = await db.execute(sql`
     INSERT INTO dp_holerites (
