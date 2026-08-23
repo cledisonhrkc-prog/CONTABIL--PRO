@@ -61,6 +61,8 @@ export interface LancamentoManualParams {
   formaPagamento?: string;
   observacao?: string;
   usuarioId?: number;
+  origem?: string;
+  referenciaId?: number;
 }
 
 export interface TransferenciaParams {
@@ -352,6 +354,8 @@ export async function criarLancamentoManual(params: LancamentoManualParams) {
     formaPagamento,
     observacao,
     usuarioId,
+    origem,
+    referenciaId,
   } = params;
 
   if (valor <= 0) throw new Error("Valor deve ser maior que zero");
@@ -370,7 +374,8 @@ export async function criarLancamentoManual(params: LancamentoManualParams) {
       participante: participante || null,
       formaPagamento: formaPagamento || null,
       status: "CONFIRMADO",
-      origem: "MANUAL",
+      origem: origem || "MANUAL",
+      referenciaId: referenciaId || null,
       observacao: observacao || null,
       usuarioId: usuarioId || null,
     })

@@ -9,6 +9,7 @@
 
 import { db } from "@/db";
 import { sql } from "drizzle-orm";
+import { criarLancamentoManual, listarContasBancarias } from "@/lib/financeiro";
 
 // ============================================================
 // TIPOS
@@ -515,9 +516,11 @@ export async function processarFolhaCLT(
   dados: { colaboradorId: number; competencia: string }
 ) {
   const vinculo = await db.execute(sql`
-    SELECT id, colaborador_id, salario_base FROM colaborador_vinculos
-    WHERE colaborador_id = ${dados.colaboradorId} AND empresa_id = ${empresaId}
-      AND tipo_vinculo = 'CLT' AND is_ativo = true AND deleted_at IS NULL
+    SELECT cv.id, cv.colaborador_id, cv.salario_base, c.nome_completo
+    FROM colaborador_vinculos cv
+    JOIN colaboradores c ON c.id = cv.colaborador_id
+    WHERE cv.colaborador_id = ${dados.colaboradorId} AND cv.empresa_id = ${empresaId}
+      AND cv.tipo_vinculo = 'CLT' AND cv.is_ativo = true AND cv.deleted_at IS NULL
   `);
   const v = vinculo.rows[0] as any;
   if (!v) throw new Error("Vínculo CLT ativo não encontrado para esse colaborador, nesta empresa.");
@@ -602,7 +605,39 @@ export async function processarFolhaCLT(
       itens_json = EXCLUDED.itens_json
     RETURNING *
   `);
-  return r.rows[0];
+  const holerite = r.rows[0] as any;
+
+  // Integração com o Financeiro: gera a saída automaticamente. Protegido
+  // com try/catch de propósito — se não houver conta bancária cadastrada
+  // (ou qualquer outro problema aqui), a folha já processada NÃO deve ser
+  // perdida. O holerite é o que importa; o lançamento financeiro é um
+  // complemento, não pode travar o resultado principal.
+  let lancamentoFinanceiro = null;
+  let avisoIntegracao: string | null = null;
+  try {
+    const contas = await listarContasBancarias(empresaId);
+    if (contas.length === 0) {
+      avisoIntegracao = "Nenhuma conta bancária cadastrada — lançamento financeiro não foi gerado automaticamente.";
+    } else {
+      const contaPrincipal = contas[0] as any;
+      lancamentoFinanceiro = await criarLancamentoManual({
+        empresaId,
+        tipo: "SAIDA",
+        data: new Date().toISOString().slice(0, 10),
+        valor: totalLiquido,
+        descricao: `Folha de pagamento — ${v.nome_completo} — competência ${dados.competencia}`,
+        contaBancariaId: contaPrincipal.id,
+        participante: v.nome_completo,
+        origem: "FOLHA_DP",
+        referenciaId: holerite.id,
+        observacao: "Gerado automaticamente ao processar a folha CLT.",
+      });
+    }
+  } catch (e: any) {
+    avisoIntegracao = `Holerite processado, mas o lançamento financeiro automático falhou: ${e.message}`;
+  }
+
+  return { ...holerite, lancamentoFinanceiro, avisoIntegracao };
 }
 
 export async function listarHolerites(empresaId: number, opts: { competencia?: string } = {}) {
