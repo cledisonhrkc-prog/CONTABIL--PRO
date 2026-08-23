@@ -513,7 +513,13 @@ export async function criarRubrica(
 // ============================================================
 export async function processarFolhaCLT(
   empresaId: number,
-  dados: { colaboradorId: number; competencia: string }
+  dados: {
+    colaboradorId: number;
+    competencia: string;
+    horaExtra50Horas?: number;
+    horaExtra100Horas?: number;
+    horasNoturnas?: number;
+  }
 ) {
   const vinculo = await db.execute(sql`
     SELECT cv.id, cv.colaborador_id, cv.salario_base, c.nome_completo
@@ -530,8 +536,30 @@ export async function processarFolhaCLT(
     throw new Error("Vínculo CLT sem salário base cadastrado.");
   }
 
+  // Verbas variáveis (hora extra, adicional noturno) — todas incidem
+  // INSS/IRRF/FGTS, por isso entram na base ANTES de calcular os impostos.
+  // Jornada padrão de 220h/mês (44h semanais), conforme praxe CLT.
+  const valorHora = salarioBase / 220;
+  const he50Horas = dados.horaExtra50Horas ?? 0;
+  const he100Horas = dados.horaExtra100Horas ?? 0;
+  const horasNoturnas = dados.horasNoturnas ?? 0;
+
+  const valorHe50 = Number((valorHora * 1.5 * he50Horas).toFixed(2));
+  const valorHe100 = Number((valorHora * 2.0 * he100Horas).toFixed(2));
+  // Adicional noturno: 20% sobre a hora + hora reduzida (52min30s = fator 1.1428)
+  const valorAdicionalNoturno = Number((valorHora * 0.2 * horasNoturnas * 1.1428).toFixed(2));
+
+  const totalVariavelBruto = valorHe50 + valorHe100 + valorAdicionalNoturno;
+  // DSR sobre variáveis: aproximação padrão de mercado (25 dias úteis, 5
+  // dias de descanso). Não é calendário exato do mês — calendário de
+  // feriados por município ainda não existe no sistema.
+  const valorDsr = totalVariavelBruto > 0 ? Number(((totalVariavelBruto / 25) * 5).toFixed(2)) : 0;
+
+  const totalVariavel = Number((totalVariavelBruto + valorDsr).toFixed(2));
+  const baseCalculo = Number((salarioBase + totalVariavel).toFixed(2));
+
   // Reaproveita o motor de cálculo já validado (dp_calcular_inss/dp_calcular_irrf)
-  const inssResult = await db.execute(sql`SELECT dp_calcular_inss(${salarioBase}::numeric, CURRENT_DATE) AS v`);
+  const inssResult = await db.execute(sql`SELECT dp_calcular_inss(${baseCalculo}::numeric, CURRENT_DATE) AS v`);
   const valorInss = Number((inssResult.rows[0] as any)?.v ?? 0);
 
   const depResult = await db.execute(sql`
@@ -540,25 +568,32 @@ export async function processarFolhaCLT(
   `);
   const qtdDependentes = Number((depResult.rows[0] as any)?.qtd ?? 0);
 
-  const baseIrrf = salarioBase - valorInss;
+  const baseIrrf = baseCalculo - valorInss;
   const irrfResult = await db.execute(sql`
     SELECT dp_calcular_irrf(${baseIrrf}::numeric, ${qtdDependentes}::int, CURRENT_DATE, false) AS v
   `);
   const valorIrrf = Number((irrfResult.rows[0] as any)?.v ?? 0);
 
-  const fgtsMes = Number((salarioBase * 0.08).toFixed(2));
+  const fgtsMes = Number((baseCalculo * 0.08).toFixed(2));
 
   const rubricas = await db.execute(sql`
     SELECT * FROM dp_rubricas WHERE empresa_id = ${empresaId} AND is_ativo = true
   `);
 
-  let totalProventos = salarioBase;
+  let totalProventos = baseCalculo;
   let totalDescontos = valorInss + valorIrrf;
   const itens: Array<{ codigo: string; nome: string; tipo: string; valor: number }> = [
     { codigo: "SALARIO", nome: "Salário base", tipo: "PROVENTO", valor: salarioBase },
-    { codigo: "INSS", nome: "INSS", tipo: "DESCONTO", valor: valorInss },
-    { codigo: "IRRF", nome: "IRRF", tipo: "DESCONTO", valor: valorIrrf },
   ];
+  if (valorHe50 > 0) itens.push({ codigo: "HE50", nome: `Hora extra 50% (${he50Horas}h)`, tipo: "PROVENTO", valor: valorHe50 });
+  if (valorHe100 > 0) itens.push({ codigo: "HE100", nome: `Hora extra 100% (${he100Horas}h)`, tipo: "PROVENTO", valor: valorHe100 });
+  if (valorAdicionalNoturno > 0) itens.push({ codigo: "AD_NOTURNO", nome: `Adicional noturno (${horasNoturnas}h)`, tipo: "PROVENTO", valor: valorAdicionalNoturno });
+  if (valorDsr > 0) itens.push({ codigo: "DSR_VAR", nome: "DSR sobre variáveis", tipo: "PROVENTO", valor: valorDsr });
+  itens.push(
+    { codigo: "INSS", nome: "INSS", tipo: "DESCONTO", valor: valorInss },
+    { codigo: "IRRF", nome: "IRRF", tipo: "DESCONTO", valor: valorIrrf }
+  );
+
 
   for (const rub of rubricas.rows as any[]) {
     const valor = Number(rub.valor_fixo);
