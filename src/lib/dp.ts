@@ -511,6 +511,45 @@ export async function criarRubrica(
 // ============================================================
 // FOLHA CLT — PROCESSAMENTO MENSAL
 // ============================================================
+export async function atualizarPensaoAlimenticia(
+  empresaId: number,
+  vinculoId: number,
+  valorPensao: number
+) {
+  if (valorPensao < 0) throw new Error("Valor de pensão não pode ser negativo.");
+  const r = await db.execute(sql`
+    UPDATE colaborador_vinculos
+    SET valor_pensao_alimenticia = ${valorPensao}
+    WHERE id = ${vinculoId} AND empresa_id = ${empresaId} AND deleted_at IS NULL
+    RETURNING *
+  `);
+  if (r.rows.length === 0) throw new Error("Vínculo não encontrado nesta empresa.");
+  return r.rows[0];
+}
+
+/**
+ * Calcula quantos dias foram trabalhados numa competência, usando a
+ * convenção comercial CLT de mês de 30 dias (não calendário real). Se o
+ * colaborador foi admitido em mês anterior, retorna 30 (mês cheio). Se foi
+ * admitido dentro do próprio mês da competência, retorna os dias restantes
+ * a partir da data de admissão.
+ */
+function calcularDiasTrabalhados(dataAdmissao: string, competencia: string): number {
+  const [anoComp, mesComp] = competencia.split("-").map(Number);
+  const admissao = new Date(dataAdmissao + "T00:00:00");
+  const anoAdm = admissao.getFullYear();
+  const mesAdm = admissao.getMonth() + 1;
+  const diaAdm = admissao.getDate();
+
+  if (anoAdm < anoComp || (anoAdm === anoComp && mesAdm < mesComp)) {
+    return 30;
+  }
+  if (anoAdm === anoComp && mesAdm === mesComp) {
+    return 30 - diaAdm + 1;
+  }
+  throw new Error("Admissão é posterior à competência informada — não é possível processar folha para um mês antes da admissão.");
+}
+
 export async function processarFolhaCLT(
   empresaId: number,
   dados: {
@@ -522,7 +561,7 @@ export async function processarFolhaCLT(
   }
 ) {
   const vinculo = await db.execute(sql`
-    SELECT cv.id, cv.colaborador_id, cv.salario_base, c.nome_completo
+    SELECT cv.id, cv.colaborador_id, cv.salario_base, cv.valor_pensao_alimenticia, cv.data_admissao, c.nome_completo
     FROM colaborador_vinculos cv
     JOIN colaboradores c ON c.id = cv.colaborador_id
     WHERE cv.colaborador_id = ${dados.colaboradorId} AND cv.empresa_id = ${empresaId}
@@ -531,15 +570,24 @@ export async function processarFolhaCLT(
   const v = vinculo.rows[0] as any;
   if (!v) throw new Error("Vínculo CLT ativo não encontrado para esse colaborador, nesta empresa.");
 
-  const salarioBase = Number(v.salario_base);
-  if (!salarioBase || salarioBase <= 0) {
+  const salarioBaseIntegral = Number(v.salario_base);
+  if (!salarioBaseIntegral || salarioBaseIntegral <= 0) {
     throw new Error("Vínculo CLT sem salário base cadastrado.");
   }
+
+  // Rateio de mês parcial: se o colaborador foi admitido dentro do próprio
+  // mês da competência, o salário (e tudo que é calculado a partir dele)
+  // é proporcional aos dias trabalhados, não o valor cheio.
+  const diasTrabalhados = calcularDiasTrabalhados(v.data_admissao, dados.competencia);
+  const salarioBase =
+    diasTrabalhados < 30
+      ? Number(((salarioBaseIntegral * diasTrabalhados) / 30).toFixed(2))
+      : salarioBaseIntegral;
 
   // Verbas variáveis (hora extra, adicional noturno) — todas incidem
   // INSS/IRRF/FGTS, por isso entram na base ANTES de calcular os impostos.
   // Jornada padrão de 220h/mês (44h semanais), conforme praxe CLT.
-  const valorHora = salarioBase / 220;
+  const valorHora = salarioBaseIntegral / 220;
   const he50Horas = dados.horaExtra50Horas ?? 0;
   const he100Horas = dados.horaExtra100Horas ?? 0;
   const horasNoturnas = dados.horasNoturnas ?? 0;
@@ -568,7 +616,12 @@ export async function processarFolhaCLT(
   `);
   const qtdDependentes = Number((depResult.rows[0] as any)?.qtd ?? 0);
 
-  const baseIrrf = baseCalculo - valorInss;
+  // Pensão alimentícia: reduz a base do IRRF (Lei 9.250/95, Art. 4º, II) —
+  // diferente de outros descontos, que não afetam a base tributável. Não
+  // reduz a base do INSS (INSS incide sempre sobre o bruto).
+  const valorPensao = Number(v.valor_pensao_alimenticia ?? 0);
+
+  const baseIrrf = baseCalculo - valorInss - valorPensao;
   const irrfResult = await db.execute(sql`
     SELECT dp_calcular_irrf(${baseIrrf}::numeric, ${qtdDependentes}::int, CURRENT_DATE, false) AS v
   `);
@@ -581,9 +634,14 @@ export async function processarFolhaCLT(
   `);
 
   let totalProventos = baseCalculo;
-  let totalDescontos = valorInss + valorIrrf;
+  let totalDescontos = valorInss + valorIrrf + valorPensao;
   const itens: Array<{ codigo: string; nome: string; tipo: string; valor: number }> = [
-    { codigo: "SALARIO", nome: "Salário base", tipo: "PROVENTO", valor: salarioBase },
+    {
+      codigo: "SALARIO",
+      nome: diasTrabalhados < 30 ? `Salário base (proporcional — ${diasTrabalhados}/30 dias)` : "Salário base",
+      tipo: "PROVENTO",
+      valor: salarioBase,
+    },
   ];
   if (valorHe50 > 0) itens.push({ codigo: "HE50", nome: `Hora extra 50% (${he50Horas}h)`, tipo: "PROVENTO", valor: valorHe50 });
   if (valorHe100 > 0) itens.push({ codigo: "HE100", nome: `Hora extra 100% (${he100Horas}h)`, tipo: "PROVENTO", valor: valorHe100 });
@@ -593,6 +651,9 @@ export async function processarFolhaCLT(
     { codigo: "INSS", nome: "INSS", tipo: "DESCONTO", valor: valorInss },
     { codigo: "IRRF", nome: "IRRF", tipo: "DESCONTO", valor: valorIrrf }
   );
+  if (valorPensao > 0) {
+    itens.push({ codigo: "PENSAO", nome: "Pensão alimentícia", tipo: "DESCONTO", valor: valorPensao });
+  }
 
 
   for (const rub of rubricas.rows as any[]) {
