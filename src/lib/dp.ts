@@ -550,6 +550,75 @@ function calcularDiasTrabalhados(dataAdmissao: string, competencia: string): num
   throw new Error("Admissão é posterior à competência informada — não é possível processar folha para um mês antes da admissão.");
 }
 
+/**
+ * Calcula e registra a provisão mensal de férias e 13º pra um vínculo CLT.
+ * Fórmula padrão: 1/12 do direito anual, por mês trabalhado. Férias inclui
+ * o 1/3 constitucional. Isso NÃO gera lançamento contábil de partida
+ * dobrada (débito DRE / crédito passivo) — isso exigiria conhecer o plano
+ * de contas real do módulo Contábil, que ainda não foi integrado. O que
+ * isso dá: o valor que a empresa já "deve" acumulado, mês a mês, por
+ * colaborador — a parte que dá pra calcular com segurança hoje.
+ */
+export async function provisionarFeriasDecimoTerceiro(
+  empresaId: number,
+  dados: { vinculoId: number; competencia: string }
+) {
+  const vinculo = await db.execute(sql`
+    SELECT id, colaborador_id, salario_base FROM colaborador_vinculos
+    WHERE id = ${dados.vinculoId} AND empresa_id = ${empresaId}
+      AND tipo_vinculo = 'CLT' AND is_ativo = true AND deleted_at IS NULL
+  `);
+  const v = vinculo.rows[0] as any;
+  if (!v) throw new Error("Vínculo CLT ativo não encontrado nesta empresa.");
+
+  const salarioBase = Number(v.salario_base);
+  const provisaoFerias = Number(((salarioBase / 12) + (salarioBase / 3 / 12)).toFixed(2));
+  const provisaoDecimoTerceiro = Number((salarioBase / 12).toFixed(2));
+
+  const r = await db.execute(sql`
+    INSERT INTO dp_provisoes (empresa_id, colaborador_id, vinculo_id, competencia, valor_provisao_ferias, valor_provisao_decimo_terceiro)
+    VALUES (${empresaId}, ${v.colaborador_id}, ${dados.vinculoId}, ${dados.competencia}, ${provisaoFerias}, ${provisaoDecimoTerceiro})
+    ON CONFLICT (vinculo_id, competencia) DO UPDATE SET
+      valor_provisao_ferias = EXCLUDED.valor_provisao_ferias,
+      valor_provisao_decimo_terceiro = EXCLUDED.valor_provisao_decimo_terceiro
+    RETURNING *
+  `);
+  return r.rows[0];
+}
+
+export async function listarProvisoes(empresaId: number, opts: { ano?: number } = {}) {
+  const r = await db.execute(sql`
+    SELECT p.*, c.nome_completo AS colaborador_nome
+    FROM dp_provisoes p
+    JOIN colaboradores c ON c.id = p.colaborador_id
+    WHERE p.empresa_id = ${empresaId}
+      AND (${opts.ano ?? null}::int IS NULL OR LEFT(p.competencia, 4)::int = ${opts.ano ?? null})
+    ORDER BY p.competencia DESC, c.nome_completo
+  `);
+  return r.rows;
+}
+
+/**
+ * Resumo do saldo acumulado de provisão por colaborador — soma tudo que
+ * já foi provisionado no ano até agora.
+ */
+export async function resumoProvisoesPorColaborador(empresaId: number, ano: number) {
+  const r = await db.execute(sql`
+    SELECT
+      p.colaborador_id,
+      c.nome_completo AS colaborador_nome,
+      SUM(p.valor_provisao_ferias) AS total_ferias_acumulado,
+      SUM(p.valor_provisao_decimo_terceiro) AS total_decimo_acumulado,
+      COUNT(*)::int AS meses_provisionados
+    FROM dp_provisoes p
+    JOIN colaboradores c ON c.id = p.colaborador_id
+    WHERE p.empresa_id = ${empresaId} AND LEFT(p.competencia, 4)::int = ${ano}
+    GROUP BY p.colaborador_id, c.nome_completo
+    ORDER BY c.nome_completo
+  `);
+  return r.rows;
+}
+
 export async function processarFolhaCLT(
   empresaId: number,
   dados: {
