@@ -619,6 +619,49 @@ export async function resumoProvisoesPorColaborador(empresaId: number, ano: numb
   return r.rows;
 }
 
+/**
+ * Pagamento de bolsa-auxílio pra estagiário — Lei 11.788/2008. NÃO é
+ * folha de pagamento CLT: sem vínculo empregatício, sem INSS, sem IRRF,
+ * sem FGTS, sem 13º, sem férias. É só o registro do valor pago.
+ */
+export async function processarPagamentoEstagiario(
+  empresaId: number,
+  dados: { colaboradorId: number; competencia: string }
+) {
+  const vinculo = await db.execute(sql`
+    SELECT cv.id, cv.colaborador_id, cv.salario_base, c.nome_completo
+    FROM colaborador_vinculos cv
+    JOIN colaboradores c ON c.id = cv.colaborador_id
+    WHERE cv.colaborador_id = ${dados.colaboradorId} AND cv.empresa_id = ${empresaId}
+      AND cv.tipo_vinculo = 'ESTAGIO' AND cv.is_ativo = true AND cv.deleted_at IS NULL
+  `);
+  const v = vinculo.rows[0] as any;
+  if (!v) throw new Error("Vínculo de estágio ativo não encontrado para esse colaborador, nesta empresa.");
+
+  const valorBolsa = Number(v.salario_base);
+  if (!valorBolsa || valorBolsa <= 0) throw new Error("Vínculo de estágio sem valor de bolsa cadastrado.");
+
+  const itens = [{ codigo: "BOLSA", nome: "Bolsa-auxílio (estágio)", tipo: "PROVENTO", valor: valorBolsa }];
+
+  const r = await db.execute(sql`
+    INSERT INTO dp_holerites (
+      empresa_id, colaborador_id, vinculo_id, competencia, salario_base,
+      total_proventos, total_descontos, total_liquido, fgts_mes, valor_inss, valor_irrf,
+      itens_json, status
+    ) VALUES (
+      ${empresaId}, ${dados.colaboradorId}, ${v.id}, ${dados.competencia}, ${valorBolsa},
+      ${valorBolsa}, 0, ${valorBolsa}, 0, 0, 0,
+      ${JSON.stringify(itens)}, 'PROCESSADO'
+    )
+    ON CONFLICT (colaborador_id, competencia) DO UPDATE SET
+      total_proventos = EXCLUDED.total_proventos,
+      total_liquido = EXCLUDED.total_liquido,
+      itens_json = EXCLUDED.itens_json
+    RETURNING *
+  `);
+  return r.rows[0];
+}
+
 export async function processarFolhaCLT(
   empresaId: number,
   dados: {
@@ -630,14 +673,14 @@ export async function processarFolhaCLT(
   }
 ) {
   const vinculo = await db.execute(sql`
-    SELECT cv.id, cv.colaborador_id, cv.salario_base, cv.valor_pensao_alimenticia, cv.data_admissao, c.nome_completo
+    SELECT cv.id, cv.colaborador_id, cv.tipo_vinculo, cv.salario_base, cv.valor_pensao_alimenticia, cv.data_admissao, c.nome_completo
     FROM colaborador_vinculos cv
     JOIN colaboradores c ON c.id = cv.colaborador_id
     WHERE cv.colaborador_id = ${dados.colaboradorId} AND cv.empresa_id = ${empresaId}
-      AND cv.tipo_vinculo = 'CLT' AND cv.is_ativo = true AND cv.deleted_at IS NULL
+      AND cv.tipo_vinculo IN ('CLT', 'APRENDIZ') AND cv.is_ativo = true AND cv.deleted_at IS NULL
   `);
   const v = vinculo.rows[0] as any;
-  if (!v) throw new Error("Vínculo CLT ativo não encontrado para esse colaborador, nesta empresa.");
+  if (!v) throw new Error("Vínculo CLT/Aprendiz ativo não encontrado para esse colaborador, nesta empresa.");
 
   const salarioBaseIntegral = Number(v.salario_base);
   if (!salarioBaseIntegral || salarioBaseIntegral <= 0) {
@@ -696,7 +739,9 @@ export async function processarFolhaCLT(
   `);
   const valorIrrf = Number((irrfResult.rows[0] as any)?.v ?? 0);
 
-  const fgtsMes = Number((baseCalculo * 0.08).toFixed(2));
+  // Aprendiz tem FGTS reduzido a 2% (Art. 15, §7º, Lei 8.036/90), não 8% do CLT padrão.
+  const aliquotaFgts = v.tipo_vinculo === "APRENDIZ" ? 0.02 : 0.08;
+  const fgtsMes = Number((baseCalculo * aliquotaFgts).toFixed(2));
 
   const rubricas = await db.execute(sql`
     SELECT * FROM dp_rubricas WHERE empresa_id = ${empresaId} AND is_ativo = true
