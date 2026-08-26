@@ -1245,10 +1245,12 @@ export async function reprocessarFolhaCLT(empresaId: number) {
     const salarioBase = Number(h.salario_base);
     const inssResult = await db.execute(sql`SELECT dp_calcular_inss(${salarioBase}::numeric, CURRENT_DATE) AS v`);
     const novoInss = Number((inssResult.rows[0] as any).v);
-    const irrfResult = await db.execute(sql`
-      SELECT dp_calcular_irrf(${salarioBase - novoInss}::numeric, 0, CURRENT_DATE, false) AS v
-    `);
-    const novoIrrf = Number((irrfResult.rows[0] as any).v);
+    const { valor: novoIrrf } = await calcularIrrfComRedutor15270(
+      salarioBase,
+      salarioBase - novoInss,
+      0,
+      new Date().toISOString().slice(0, 10)
+    );
 
     if (Math.abs(novoInss - Number(h.inss_antigo)) < 0.01 && Math.abs(novoIrrf - Number(h.irrf_antigo)) < 0.01) {
       continue; // já está certo
