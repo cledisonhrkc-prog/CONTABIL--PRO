@@ -55,15 +55,37 @@ export async function GET(req: NextRequest) {
       colaboradorCpf = h.cpf;
       titulo = `Holerite — Competência ${h.competencia}`;
       filename = `holerite-${h.competencia}.pdf`;
-      linhas = [
-        { label: "Salário base", valor: formatBRL(h.salario_base) },
-        { label: "Total de proventos", valor: formatBRL(h.total_proventos) },
-        { label: "INSS", valor: formatBRL(h.valor_inss) },
-        { label: "IRRF", valor: formatBRL(h.valor_irrf) },
-        { label: "Total de descontos", valor: formatBRL(h.total_descontos) },
-        { label: "FGTS do mês (informativo)", valor: formatBRL(h.fgts_mes) },
-        { label: "LÍQUIDO A RECEBER", valor: formatBRL(h.total_liquido), destaque: true },
-      ];
+
+      // Mostra o detalhe rubrica por rubrica (salário, hora extra, adicional
+      // noturno, pensão, INSS, IRRF...) em vez de só o resumo — o detalhe
+      // já existe em itens_json desde as correções de hoje, mas o PDF
+      // nunca tinha sido atualizado pra ler ele.
+      let itensDetalhados: Array<{ codigo: string; nome: string; tipo: string; valor: number }> = [];
+      try {
+        itensDetalhados = typeof h.itens_json === "string" ? JSON.parse(h.itens_json) : h.itens_json ?? [];
+      } catch {
+        itensDetalhados = [];
+      }
+
+      if (itensDetalhados.length > 0) {
+        linhas = itensDetalhados.map((item) => ({
+          label: item.nome,
+          valor: item.tipo === "DESCONTO" ? `- ${formatBRL(item.valor)}` : formatBRL(item.valor),
+        }));
+        linhas.push({ label: "FGTS do mês (informativo)", valor: formatBRL(h.fgts_mes) });
+        linhas.push({ label: "LÍQUIDO A RECEBER", valor: formatBRL(h.total_liquido), destaque: true });
+      } else {
+        // Fallback pra holerites antigos, gravados antes do itens_json existir
+        linhas = [
+          { label: "Salário base", valor: formatBRL(h.salario_base) },
+          { label: "Total de proventos", valor: formatBRL(h.total_proventos) },
+          { label: "INSS", valor: formatBRL(h.valor_inss) },
+          { label: "IRRF", valor: formatBRL(h.valor_irrf) },
+          { label: "Total de descontos", valor: formatBRL(h.total_descontos) },
+          { label: "FGTS do mês (informativo)", valor: formatBRL(h.fgts_mes) },
+          { label: "LÍQUIDO A RECEBER", valor: formatBRL(h.total_liquido), destaque: true },
+        ];
+      }
     } else if (tipo === "prolabore") {
       const r = await db.execute(sql`
         SELECT p.*, c.nome_completo, c.cpf FROM pro_labore_pagamentos p
