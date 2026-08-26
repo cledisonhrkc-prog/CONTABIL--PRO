@@ -788,6 +788,48 @@ export async function processarPagamentoAutonomo(
   return r.rows[0];
 }
 
+/**
+ * Salário-família (Lei 8.213/91). Valores 2026 confirmados via múltiplas
+ * fontes independentes contra a Portaria Interministerial MPS/MF nº
+ * 13/2026: cota R$67,54/filho, teto de remuneração R$1.980,38 — NÃO os
+ * R$62,65/R$1.725,46 que vieram num material recebido (valores errados,
+ * pareciam de outro ano). Não incide INSS, IRRF, nem FGTS.
+ */
+export function calcularSalarioFamilia(salarioBase: number, numFilhosElegiveis: number): number {
+  const TETO_SALARIO_FAMILIA_2026 = 1980.38;
+  const VALOR_COTA_2026 = 67.54;
+  if (salarioBase > TETO_SALARIO_FAMILIA_2026) return 0;
+  return Number((numFilhosElegiveis * VALOR_COTA_2026).toFixed(2));
+}
+
+/**
+ * Adicional de periculosidade (CLT Art. 193, Súmula 132 TST): 30% sobre
+ * o salário base (contratual, sem outros adicionais). Incide INSS, IRRF
+ * e FGTS normalmente — diferente do salário-família.
+ */
+export function calcularPericulosidade(salarioBase: number, ehAtividadePericulosa: boolean): number {
+  if (!ehAtividadePericulosa) return 0;
+  return Number((salarioBase * 0.3).toFixed(2));
+}
+
+/**
+ * INSS Patronal — 20% sobre a folha é a alíquota padrão, mas SÓ vale
+ * pra empresas Lucro Real/Presumido. Empresas Simples Nacional geralmente
+ * já pagam isso embutido no DAS unificado (varia por Anexo) — aplicar
+ * 20% separado pra uma empresa Simples cobraria em duplicidade. Por
+ * isso essa função exige informar o regime explicitamente, e retorna
+ * null (não calcula) se for Simples, em vez de assumir e errar.
+ */
+export function calcularInssPatronal(
+  baseCalculoFolha: number,
+  regimeTributario: "SIMPLES_NACIONAL" | "LUCRO_PRESUMIDO" | "LUCRO_REAL"
+): number | null {
+  if (regimeTributario === "SIMPLES_NACIONAL") {
+    return null; // já embutido no DAS na maioria dos Anexos — não calcular aqui evita cobrança em duplicidade
+  }
+  return Number((baseCalculoFolha * 0.2).toFixed(2));
+}
+
 export async function processarFolhaCLT(
   empresaId: number,
   dados: {
