@@ -662,6 +662,50 @@ export async function processarPagamentoEstagiario(
   return r.rows[0];
 }
 
+/**
+ * Redutor de IRRF da Lei 15.270/2025 — isenção até R$5.000 e redução
+ * parcial até R$7.350. IMPORTANTE: o redutor incide sobre o RENDIMENTO
+ * BRUTO (salário cheio, antes de INSS/dependentes/desconto simplificado),
+ * não sobre a base já descontada — confirmado contra múltiplas fontes em
+ * 24/08/2026. Usar a base errada é um erro comum ("ferramentas genéricas"
+ * segundo fonte pesquisada) que gera imposto incorreto.
+ */
+async function calcularIrrfComRedutor15270(
+  rendimentoBruto: number,
+  baseAposInss: number,
+  qtdDependentes: number,
+  data: string
+): Promise<{ valor: number; metodo: string }> {
+  // Isenção total até R$5.000 de rendimento bruto
+  if (rendimentoBruto <= 5000) {
+    return { valor: 0, metodo: "ISENTO_LEI_15270" };
+  }
+
+  // Calcula pela tabela normal — pega o menor entre dedução legal
+  // (dependentes) e desconto simplificado, como sempre.
+  const rLegal = await db.execute(sql`
+    SELECT dp_calcular_irrf(${baseAposInss}::numeric, ${qtdDependentes}::int, ${data}::date, false) AS v
+  `);
+  const irrfLegal = Number((rLegal.rows[0] as any)?.v ?? 0);
+  const rSimpl = await db.execute(sql`
+    SELECT dp_calcular_irrf(${baseAposInss}::numeric, 0::int, ${data}::date, true) AS v
+  `);
+  const irrfSimplificado = Number((rSimpl.rows[0] as any)?.v ?? 0);
+  const usaSimplificado = irrfSimplificado < irrfLegal;
+  const irrfBase = usaSimplificado ? irrfSimplificado : irrfLegal;
+  const metodoBase = usaSimplificado ? "SIMPLIFICADO" : "LEGAL";
+
+  // Acima de R$7.350 de rendimento bruto: sem redutor, tabela cheia
+  if (rendimentoBruto > 7350) {
+    return { valor: irrfBase, metodo: metodoBase };
+  }
+
+  // Faixa intermediária R$5.000,01–R$7.350: redutor sobre o BRUTO
+  const redutor = 978.62 - 0.133145 * rendimentoBruto;
+  const valorFinal = Number(Math.max(0, irrfBase - redutor).toFixed(2));
+  return { valor: valorFinal, metodo: `${metodoBase}_REDUTOR_15270` };
+}
+
 export async function processarFolhaCLT(
   empresaId: number,
   dados: {
@@ -734,10 +778,15 @@ export async function processarFolhaCLT(
   const valorPensao = Number(v.valor_pensao_alimenticia ?? 0);
 
   const baseIrrf = baseCalculo - valorInss - valorPensao;
-  const irrfResult = await db.execute(sql`
-    SELECT dp_calcular_irrf(${baseIrrf}::numeric, ${qtdDependentes}::int, CURRENT_DATE, false) AS v
-  `);
-  const valorIrrf = Number((irrfResult.rows[0] as any)?.v ?? 0);
+  // Redutor da Lei 15.270/2025 aplicado sobre baseCalculo (rendimento
+  // bruto), não sobre baseIrrf — a lei exige o bruto, não a base já
+  // descontada (confirmado contra múltiplas fontes).
+  const { valor: valorIrrf, metodo: metodoIrrf } = await calcularIrrfComRedutor15270(
+    baseCalculo,
+    baseIrrf,
+    qtdDependentes,
+    dados.competencia + "-01"
+  );
 
   // Aprendiz tem FGTS reduzido a 2% (Art. 15, §7º, Lei 8.036/90), não 8% do CLT padrão.
   const aliquotaFgts = v.tipo_vinculo === "APRENDIZ" ? 0.02 : 0.08;
