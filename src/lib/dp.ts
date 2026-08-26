@@ -841,7 +841,8 @@ export async function processarFolhaCLT(
   }
 ) {
   const vinculo = await db.execute(sql`
-    SELECT cv.id, cv.colaborador_id, cv.tipo_vinculo, cv.salario_base, cv.valor_pensao_alimenticia, cv.data_admissao, c.nome_completo
+    SELECT cv.id, cv.colaborador_id, cv.tipo_vinculo, cv.salario_base, cv.valor_pensao_alimenticia,
+           cv.data_admissao, cv.num_filhos_salario_familia, cv.possui_periculosidade, c.nome_completo
     FROM colaborador_vinculos cv
     JOIN colaboradores c ON c.id = cv.colaborador_id
     WHERE cv.colaborador_id = ${dados.colaboradorId} AND cv.empresa_id = ${empresaId}
@@ -877,7 +878,11 @@ export async function processarFolhaCLT(
   // Adicional noturno: 20% sobre a hora + hora reduzida (52min30s = fator 1.1428)
   const valorAdicionalNoturno = Number((valorHora * 0.2 * horasNoturnas * 1.1428).toFixed(2));
 
-  const totalVariavelBruto = valorHe50 + valorHe100 + valorAdicionalNoturno;
+  // Periculosidade (CLT Art. 193): 30% sobre o salário base, incide
+  // INSS/IRRF/FGTS normalmente — mesmo tratamento de hora extra.
+  const valorPericulosidade = v.possui_periculosidade ? calcularPericulosidade(salarioBase, true) : 0;
+
+  const totalVariavelBruto = valorHe50 + valorHe100 + valorAdicionalNoturno + valorPericulosidade;
   // DSR sobre variáveis: aproximação padrão de mercado (25 dias úteis, 5
   // dias de descanso). Não é calendário exato do mês — calendário de
   // feriados por município ainda não existe no sistema.
@@ -885,6 +890,12 @@ export async function processarFolhaCLT(
 
   const totalVariavel = Number((totalVariavelBruto + valorDsr).toFixed(2));
   const baseCalculo = Number((salarioBase + totalVariavel).toFixed(2));
+
+  // Salário família (Lei 8.213/91): NÃO entra na base de cálculo — não
+  // incide INSS, IRRF nem FGTS. Entra só no total pago ao colaborador.
+  const numFilhosSalarioFamilia = Number(v.num_filhos_salario_familia ?? 0);
+  const valorSalarioFamilia =
+    numFilhosSalarioFamilia > 0 ? calcularSalarioFamilia(salarioBase, numFilhosSalarioFamilia) : 0;
 
   // Reaproveita o motor de cálculo já validado (dp_calcular_inss/dp_calcular_irrf)
   const inssResult = await db.execute(sql`SELECT dp_calcular_inss(${baseCalculo}::numeric, CURRENT_DATE) AS v`);
@@ -920,7 +931,7 @@ export async function processarFolhaCLT(
     SELECT * FROM dp_rubricas WHERE empresa_id = ${empresaId} AND is_ativo = true
   `);
 
-  let totalProventos = baseCalculo;
+  let totalProventos = baseCalculo + valorSalarioFamilia;
   let totalDescontos = valorInss + valorIrrf + valorPensao;
   const itens: Array<{ codigo: string; nome: string; tipo: string; valor: number }> = [
     {
@@ -930,6 +941,8 @@ export async function processarFolhaCLT(
       valor: salarioBase,
     },
   ];
+  if (valorPericulosidade > 0) itens.push({ codigo: "PERICULOSIDADE", nome: "Adicional de periculosidade (30%)", tipo: "PROVENTO", valor: valorPericulosidade });
+  if (valorSalarioFamilia > 0) itens.push({ codigo: "SAL_FAMILIA", nome: `Salário família (${numFilhosSalarioFamilia} filho(s))`, tipo: "PROVENTO", valor: valorSalarioFamilia });
   if (valorHe50 > 0) itens.push({ codigo: "HE50", nome: `Hora extra 50% (${he50Horas}h)`, tipo: "PROVENTO", valor: valorHe50 });
   if (valorHe100 > 0) itens.push({ codigo: "HE100", nome: `Hora extra 100% (${he100Horas}h)`, tipo: "PROVENTO", valor: valorHe100 });
   if (valorAdicionalNoturno > 0) itens.push({ codigo: "AD_NOTURNO", nome: `Adicional noturno (${horasNoturnas}h)`, tipo: "PROVENTO", valor: valorAdicionalNoturno });
