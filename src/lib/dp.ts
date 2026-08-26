@@ -706,6 +706,88 @@ async function calcularIrrfComRedutor15270(
   return { valor: valorFinal, metodo: `${metodoBase}_REDUTOR_15270` };
 }
 
+/**
+ * Processa pagamento de Autônomo/RPA. Regras:
+ * - INSS: retenção fixa de 11%, limitada ao teto (mesma regra do
+ *   pró-labore, contribuinte individual — Lei 8.212/91)
+ * - IRRF: tabela progressiva COM o redutor da Lei 15.270/2025 — a
+ *   Receita Federal confirmou oficialmente que carnê-leão/autônomos
+ *   também têm direito ("deverão rever seus cálculos mensais",
+ *   comunicado de 11/12/2025). Um material que recebi antes excluía
+ *   o RPA do redutor por engano — verificado e corrigido.
+ * - ISS: retenção municipal, alíquota varia por cidade — parâmetro,
+ *   não tem como cravar um valor único no sistema.
+ * - FGTS: não incide (sem vínculo empregatício).
+ */
+export async function processarPagamentoAutonomo(
+  empresaId: number,
+  dados: { colaboradorId: number; competencia: string; valorBruto: number; aliquotaIss?: number }
+) {
+  const vinculo = await db.execute(sql`
+    SELECT cv.id, cv.colaborador_id, c.nome_completo
+    FROM colaborador_vinculos cv
+    JOIN colaboradores c ON c.id = cv.colaborador_id
+    WHERE cv.colaborador_id = ${dados.colaboradorId} AND cv.empresa_id = ${empresaId}
+      AND cv.tipo_vinculo = 'AUTONOMO' AND cv.is_ativo = true AND cv.deleted_at IS NULL
+  `);
+  const v = vinculo.rows[0] as any;
+  if (!v) throw new Error("Vínculo de autônomo ativo não encontrado para esse colaborador, nesta empresa.");
+
+  const valorBruto = dados.valorBruto;
+  if (!valorBruto || valorBruto <= 0) throw new Error("Valor bruto do RPA deve ser maior que zero.");
+
+  const rInss = await db.execute(sql`SELECT dp_calcular_inss_prolabore(${valorBruto}::numeric, CURRENT_DATE) AS v`);
+  const valorInss = Number((rInss.rows[0] as any)?.v ?? 0);
+
+  const aliquotaIss = dados.aliquotaIss ?? 0;
+  const valorIss = Number((valorBruto * aliquotaIss).toFixed(2));
+
+  const baseIrrf = valorBruto - valorInss - valorIss;
+  const { valor: valorIrrf, metodo: metodoIrrf } = await calcularIrrfComRedutor15270(
+    valorBruto,
+    baseIrrf,
+    0,
+    dados.competencia + "-01"
+  );
+
+  const totalDescontos = Number((valorInss + valorIss + valorIrrf).toFixed(2));
+  const totalLiquido = Number((valorBruto - totalDescontos).toFixed(2));
+
+  if (totalLiquido < 0) {
+    throw new Error(
+      `Não é possível processar: os descontos (R$ ${totalDescontos.toFixed(2)}) são maiores que o valor bruto (R$ ${valorBruto.toFixed(2)}).`
+    );
+  }
+
+  const itens = [
+    { codigo: "RPA_BRUTO", nome: "Valor bruto do serviço", tipo: "PROVENTO", valor: valorBruto },
+    { codigo: "INSS", nome: "INSS (11% fixo, contribuinte individual)", tipo: "DESCONTO", valor: valorInss },
+    ...(valorIss > 0 ? [{ codigo: "ISS", nome: `ISS (${(aliquotaIss * 100).toFixed(1)}%)`, tipo: "DESCONTO", valor: valorIss }] : []),
+    { codigo: "IRRF", nome: `IRRF (${metodoIrrf})`, tipo: "DESCONTO", valor: valorIrrf },
+  ];
+
+  const r = await db.execute(sql`
+    INSERT INTO dp_holerites (
+      empresa_id, colaborador_id, vinculo_id, competencia, salario_base,
+      total_proventos, total_descontos, total_liquido, fgts_mes, valor_inss, valor_irrf,
+      itens_json, status
+    ) VALUES (
+      ${empresaId}, ${dados.colaboradorId}, ${v.id}, ${dados.competencia}, ${valorBruto},
+      ${valorBruto}, ${totalDescontos}, ${totalLiquido}, 0, ${valorInss}, ${valorIrrf},
+      ${JSON.stringify(itens)}, 'PROCESSADO'
+    )
+    ON CONFLICT (colaborador_id, competencia) DO UPDATE SET
+      total_proventos = EXCLUDED.total_proventos,
+      total_descontos = EXCLUDED.total_descontos,
+      total_liquido = EXCLUDED.total_liquido,
+      valor_inss = EXCLUDED.valor_inss,
+      valor_irrf = EXCLUDED.valor_irrf,
+      itens_json = EXCLUDED.itens_json
+    RETURNING *
+  `);
+  return r.rows[0];
+}
+
 export async function processarFolhaCLT(
   empresaId: number,
   dados: {
