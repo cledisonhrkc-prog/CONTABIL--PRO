@@ -275,8 +275,6 @@ export async function dashboardResumo(empresaId: number) {
   }>(sql`
     SELECT
       (SELECT COUNT(*)::text FROM notas_fiscais WHERE empresa_id = ${empresaId}) AS qtd,
-      -- Faturamento = SUM(vNF) PURO das notas de SAÍDA (venda/serviço).
-      -- Não deduz ICMS-ST, não deduz nada. Mesmo cálculo do Colab.
       (SELECT COALESCE(SUM(valor_total),0)::text FROM notas_fiscais
         WHERE empresa_id = ${empresaId}
           AND tipo_operacao='SAIDA'
