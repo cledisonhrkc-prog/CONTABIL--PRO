@@ -861,6 +861,7 @@ export async function processarFolhaCLT(
     horaExtra100Horas?: number;
     horasNoturnas?: number;
     diasAfastamentoDoenca?: number;
+    licencaMaternidade?: boolean;
   }
 ) {
   const vinculo = await db.execute(sql`
@@ -982,6 +983,19 @@ export async function processarFolhaCLT(
     },
   ];
   if (valorPericulosidade > 0) itens.push({ codigo: "PERICULOSIDADE", nome: "Adicional de periculosidade (30%)", tipo: "PROVENTO", valor: valorPericulosidade });
+  if (dados.licencaMaternidade) {
+    // Salário-maternidade CLT: empresa paga 100% do salário normal (Art.
+    // 72, Lei 8.213/91), sem redução — depois compensa com o INSS via
+    // eSocial. Confirmado: Tema 72 STF isenta o INSS Patronal sobre essa
+    // competência (não muda o valor pago ao colaborador, só o custo da
+    // empresa). Nota informativa, não altera o cálculo.
+    itens.push({
+      codigo: "NOTA_LICENCA_MATERNIDADE",
+      nome: "Competência em licença-maternidade — valor integral pago normalmente, empresa compensa com INSS depois (Art. 72, Lei 8.213/91). Sem INSS Patronal (Tema 72 STF).",
+      tipo: "INFORMATIVO",
+      valor: 0,
+    });
+  }
   if (valorSalarioFamilia > 0) itens.push({ codigo: "SAL_FAMILIA", nome: `Salário família (${numFilhosSalarioFamilia} filho(s))`, tipo: "PROVENTO", valor: valorSalarioFamilia });
   if (valorHe50 > 0) itens.push({ codigo: "HE50", nome: `Hora extra 50% (${he50Horas}h)`, tipo: "PROVENTO", valor: valorHe50 });
   if (valorHe100 > 0) itens.push({ codigo: "HE100", nome: `Hora extra 100% (${he100Horas}h)`, tipo: "PROVENTO", valor: valorHe100 });
