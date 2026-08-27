@@ -2,27 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Badge } from "@/components/ui/badge";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { ArrowLeft, Plus } from "lucide-react";
+import { ArrowLeft, Plus, Gift } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
@@ -32,10 +12,8 @@ type Decimo = {
   colaborador_nome: string;
   ano: number;
   parcela: number;
-  valor_parcela: string;
-  valor_inss: string;
-  valor_irrf: string;
-  valor_liquido: string;
+  total_bruto: string;
+  total_liquido: string;
   status: string;
 };
 
@@ -43,8 +21,7 @@ export default function DecimoTerceiroPage() {
   const [clts, setClts] = useState<VinculoCLT[]>([]);
   const [lista, setLista] = useState<Decimo[]>([]);
   const [loading, setLoading] = useState(true);
-  const [nova, setNova] = useState(false);
-
+  const [novo, setNovo] = useState(false);
   const [vinculoId, setVinculoId] = useState("");
   const [ano, setAno] = useState(String(new Date().getFullYear()));
   const [parcela, setParcela] = useState("1");
@@ -74,7 +51,7 @@ export default function DecimoTerceiroPage() {
 
   async function salvar() {
     if (!vinculoId || !ano || !parcela) {
-      setErro("Preencha colaborador, ano e parcela.");
+      setErro("Preencha todos os campos obrigatórios.");
       return;
     }
     setSalvando(true);
@@ -87,8 +64,9 @@ export default function DecimoTerceiroPage() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || "Erro ao calcular 13º");
-      setNova(false);
+      setNovo(false);
       setVinculoId("");
+      setParcela("1");
       await load();
     } catch (e: any) {
       setErro(e.message || "Erro ao calcular 13º.");
@@ -98,122 +76,125 @@ export default function DecimoTerceiroPage() {
   }
 
   return (
-    <div className="space-y-6 p-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">13º Salário</h1>
-          <p className="text-muted-foreground">1ª e 2ª parcela — CLT</p>
-        </div>
-        <div className="flex gap-2">
-          <Button asChild variant="ghost">
-            <Link href="/dp">← Voltar</Link>
-          </Button>
-          {!nova && (
-            <Button onClick={() => setNova(true)}>
-              <Plus className="h-4 w-4 mr-1" /> Calcular
-            </Button>
-          )}
+    <div className="min-h-screen bg-slate-50 -m-6">
+      <div className="bg-gradient-to-r from-indigo-600 to-purple-600 px-6 py-6 rounded-b-3xl shadow-lg mb-5">
+        <div className="max-w-5xl mx-auto flex items-center justify-between">
+          <div>
+            <p className="text-indigo-200 text-sm font-medium">Departamento Pessoal</p>
+            <h1 className="text-white text-2xl font-bold mt-0.5">13º Salário</h1>
+            <p className="text-indigo-100 text-sm mt-1">Cálculo de 1ª e 2ª parcela</p>
+          </div>
+          <div className="flex gap-2">
+            <Link
+              href="/dp"
+              className="inline-flex items-center gap-1.5 px-4 py-2.5 bg-white/15 text-white rounded-xl text-sm font-semibold border border-white/20 hover:bg-white/25 transition"
+            >
+              <ArrowLeft className="h-4 w-4" /> Voltar
+            </Link>
+            <button
+              onClick={() => setNovo(!novo)}
+              className="inline-flex items-center gap-1.5 px-4 py-2.5 bg-white text-indigo-700 rounded-xl text-sm font-semibold shadow-sm hover:bg-slate-50 transition"
+            >
+              <Plus className="h-4 w-4" /> Calcular 13º
+            </button>
+          </div>
         </div>
       </div>
 
-      {nova && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Calcular 13º</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label>Colaborador</Label>
-              <Select value={vinculoId} onValueChange={setVinculoId}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Selecione..." />
-                </SelectTrigger>
-                <SelectContent>
+      <div className="max-w-5xl mx-auto px-6 pb-8 space-y-5">
+        {novo && (
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5 space-y-4">
+            <h2 className="text-sm font-semibold text-slate-900">Calcular Nova Parcela</h2>
+            <div className="grid grid-cols-3 gap-4">
+              <div>
+                <label className="text-sm text-slate-500 block mb-1">Colaborador</label>
+                <select
+                  className="w-full border border-slate-200 rounded-xl p-2.5 text-sm bg-slate-50"
+                  value={vinculoId}
+                  onChange={(e) => setVinculoId(e.target.value)}
+                >
+                  <option value="">Selecione...</option>
                   {clts.map((c) => (
-                    <SelectItem key={c.id} value={String(c.id)}>
+                    <option key={c.id} value={c.id}>
                       {c.colaborador_nome}
-                    </SelectItem>
+                    </option>
                   ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>Ano</Label>
-                <Input type="number" value={ano} onChange={(e) => setAno(e.target.value)} />
+                </select>
               </div>
-              <div className="space-y-2">
-                <Label>Parcela</Label>
-                <Select value={parcela} onValueChange={setParcela}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="1">1ª parcela (50%, sem desconto)</SelectItem>
-                    <SelectItem value="2">2ª parcela (com INSS/IRRF)</SelectItem>
-                  </SelectContent>
-                </Select>
+              <div>
+                <label className="text-sm text-slate-500 block mb-1">Ano</label>
+                <input
+                  type="number"
+                  className="w-full border border-slate-200 rounded-xl p-2.5 text-sm bg-slate-50"
+                  value={ano}
+                  onChange={(e) => setAno(e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="text-sm text-slate-500 block mb-1">Parcela</label>
+                <select
+                  className="w-full border border-slate-200 rounded-xl p-2.5 text-sm bg-slate-50"
+                  value={parcela}
+                  onChange={(e) => setParcela(e.target.value)}
+                >
+                  <option value="1">1ª parcela (sem desconto)</option>
+                  <option value="2">2ª parcela (com INSS/IRRF sobre o total)</option>
+                </select>
               </div>
             </div>
             {erro && <p className="text-sm text-red-600">{erro}</p>}
-            <div className="flex gap-2">
-              <Button onClick={salvar} disabled={salvando}>
-                {salvando ? "Calculando..." : "Calcular e salvar"}
-              </Button>
-              <Button variant="outline" onClick={() => setNova(false)}>
-                Cancelar
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      )}
+            <button
+              onClick={salvar}
+              disabled={salvando}
+              className="inline-flex items-center gap-2 px-4 py-2.5 bg-indigo-600 text-white rounded-xl text-sm font-semibold hover:bg-indigo-700 disabled:opacity-50"
+            >
+              {salvando ? "Calculando..." : "Calcular"}
+            </button>
+          </div>
+        )}
 
-      <Card>
-        <CardContent className="p-0">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Colaborador</TableHead>
-                <TableHead>Ano</TableHead>
-                <TableHead>Parcela</TableHead>
-                <TableHead className="text-right">Valor da parcela</TableHead>
-                <TableHead className="text-right">INSS</TableHead>
-                <TableHead className="text-right">IRRF</TableHead>
-                <TableHead className="text-right">Líquido</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {loading ? (
-                <TableRow>
-                  <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
-                    Carregando...
-                  </TableCell>
-                </TableRow>
-              ) : lista.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
-                    Nenhum 13º calculado ainda.
-                  </TableCell>
-                </TableRow>
-              ) : (
-                lista.map((d) => (
-                  <TableRow key={d.id}>
-                    <TableCell>{d.colaborador_nome}</TableCell>
-                    <TableCell>{d.ano}</TableCell>
-                    <TableCell>
-                      <Badge variant={d.parcela === 1 ? "secondary" : "default"}>{d.parcela}ª parcela</Badge>
-                    </TableCell>
-                    <TableCell className="text-right">R$ {Number(d.valor_parcela).toFixed(2)}</TableCell>
-                    <TableCell className="text-right">R$ {Number(d.valor_inss).toFixed(2)}</TableCell>
-                    <TableCell className="text-right">R$ {Number(d.valor_irrf).toFixed(2)}</TableCell>
-                    <TableCell className="text-right font-medium">R$ {Number(d.valor_liquido).toFixed(2)}</TableCell>
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
+          <h2 className="text-sm font-semibold text-slate-900 mb-4 flex items-center gap-2">
+            <Gift className="h-4 w-4 text-indigo-500" /> 13º Salário Calculado
+          </h2>
+          {loading ? (
+            <p className="text-sm text-slate-400 py-6 text-center">Carregando...</p>
+          ) : lista.length === 0 ? (
+            <p className="text-sm text-slate-400 py-6 text-center">Nenhum 13º calculado ainda.</p>
+          ) : (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-slate-400 border-b border-slate-100">
+                  <th className="pb-2">Colaborador</th>
+                  <th className="pb-2 text-center">Ano</th>
+                  <th className="pb-2 text-center">Parcela</th>
+                  <th className="pb-2 text-right">Bruto</th>
+                  <th className="pb-2 text-right">Líquido</th>
+                  <th className="pb-2 text-center">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {lista.map((d) => (
+                  <tr key={d.id} className="border-b border-slate-50">
+                    <td className="py-2.5 font-medium text-slate-800">{d.colaborador_nome}</td>
+                    <td className="py-2.5 text-center">{d.ano}</td>
+                    <td className="py-2.5 text-center">{d.parcela}ª</td>
+                    <td className="py-2.5 text-right text-emerald-600">R$ {Number(d.total_bruto).toFixed(2)}</td>
+                    <td className="py-2.5 text-right font-bold text-slate-900">
+                      R$ {Number(d.total_liquido).toFixed(2)}
+                    </td>
+                    <td className="py-2.5 text-center">
+                      <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 font-medium">
+                        {d.status}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
