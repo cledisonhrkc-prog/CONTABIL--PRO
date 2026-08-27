@@ -24,6 +24,7 @@ import {
   HeartPulse,
   SlidersHorizontal,
   CalendarClock,
+  Landmark,
 } from "lucide-react";
 
 const menu: Array<{ label: string; href: string; icon: React.ElementType }> = [
@@ -35,6 +36,7 @@ const menu: Array<{ label: string; href: string; icon: React.ElementType }> = [
   { label: "Departamento Pessoal", href: "/dp", icon: Users },
   { label: "Config. Avançadas do Vínculo", href: "/dp/vinculos-config", icon: SlidersHorizontal },
   { label: "Folha — Eventos Especiais", href: "/dp/folha-avancada", icon: CalendarClock },
+  { label: "Integração Contábil (Folha)", href: "/dp/contabil-parametros", icon: Landmark },
   { label: "Relatório de Convênio", href: "/dp/relatorio-convenio", icon: HeartPulse },
   { label: "Balancete", href: "/balancete", icon: Scale },
   { label: "DRE / Balanço", href: "/dre", icon: TrendingUp },
