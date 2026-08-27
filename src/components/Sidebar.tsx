@@ -21,6 +21,7 @@ import {
   Wallet,
   Users,
   LogOut,
+  HeartPulse,
 } from "lucide-react";
 
 const menu: Array<{ label: string; href: string; icon: React.ElementType }> = [
@@ -30,6 +31,7 @@ const menu: Array<{ label: string; href: string; icon: React.ElementType }> = [
   { label: "Lançamentos", href: "/lancamentos", icon: FileText },
   { label: "Financeiro", href: "/financeiro", icon: Wallet },
   { label: "Departamento Pessoal", href: "/dp", icon: Users },
+  { label: "Relatório de Convênio", href: "/dp/relatorio-convenio", icon: HeartPulse },
   { label: "Balancete", href: "/balancete", icon: Scale },
   { label: "DRE / Balanço", href: "/dre", icon: TrendingUp },
   { label: "Auditoria R08", href: "/auditoria", icon: Search },
@@ -58,8 +60,6 @@ export default function Sidebar() {
         setEmpresas(lista);
       })
       .catch(() => {});
-    // Lê a empresa já selecionada, se houver, direto do cookie visível no client
-    // (empresa_ativa_id não é httpOnly no seu sistema, então dá pra ler assim)
     const match = document.cookie.match(/empresa_ativa_id=([^;]+)/);
     if (match) setEmpresaId(match[1]);
   }, []);
