@@ -25,6 +25,10 @@ import {
   SlidersHorizontal,
   CalendarClock,
   Landmark,
+  GraduationCap,
+  Briefcase,
+  UserCog,
+  Handshake,
 } from "lucide-react";
 
 const menu: Array<{ label: string; href: string; icon: React.ElementType }> = [
@@ -34,6 +38,10 @@ const menu: Array<{ label: string; href: string; icon: React.ElementType }> = [
   { label: "Lançamentos", href: "/lancamentos", icon: FileText },
   { label: "Financeiro", href: "/financeiro", icon: Wallet },
   { label: "Departamento Pessoal", href: "/dp", icon: Users },
+  { label: "Novo Aprendiz", href: "/dp/aprendiz-novo", icon: GraduationCap },
+  { label: "Estágio", href: "/dp/estagio", icon: Briefcase },
+  { label: "Autônomo / RPA", href: "/dp/autonomo", icon: UserCog },
+  { label: "Rescisão por Acordo", href: "/dp/rescisao-acordo", icon: Handshake },
   { label: "Config. Avançadas do Vínculo", href: "/dp/vinculos-config", icon: SlidersHorizontal },
   { label: "Folha — Eventos Especiais", href: "/dp/folha-avancada", icon: CalendarClock },
   { label: "Integração Contábil (Folha)", href: "/dp/contabil-parametros", icon: Landmark },
