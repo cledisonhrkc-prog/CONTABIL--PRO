@@ -29,6 +29,7 @@ import {
   Briefcase,
   UserCog,
   Handshake,
+  Upload,
 } from "lucide-react";
 
 const menu: Array<{ label: string; href: string; icon: React.ElementType }> = [
@@ -37,6 +38,7 @@ const menu: Array<{ label: string; href: string; icon: React.ElementType }> = [
   { label: "Cadastros", href: "/cadastros", icon: ClipboardList },
   { label: "Lançamentos", href: "/lancamentos", icon: FileText },
   { label: "Financeiro", href: "/financeiro", icon: Wallet },
+  { label: "Importar Extrato (OFX/Excel)", href: "/financeiro/importar-extrato", icon: Upload },
   { label: "Departamento Pessoal", href: "/dp", icon: Users },
   { label: "Novo Aprendiz", href: "/dp/aprendiz-novo", icon: GraduationCap },
   { label: "Estágio", href: "/dp/estagio", icon: Briefcase },
@@ -101,7 +103,6 @@ export default function Sidebar() {
     try {
       await fetch("/api/auth/logout", { method: "POST" });
     } catch {
-      // mesmo se der erro na chamada, ainda tenta mandar pro login
     } finally {
       router.push("/login");
       router.refresh();
