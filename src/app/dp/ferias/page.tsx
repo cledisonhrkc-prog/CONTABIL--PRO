@@ -2,27 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Badge } from "@/components/ui/badge";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { ArrowLeft, Plus } from "lucide-react";
+import { ArrowLeft, Plus, CalendarDays } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
@@ -44,7 +24,6 @@ export default function FeriasPage() {
   const [lista, setLista] = useState<Ferias[]>([]);
   const [loading, setLoading] = useState(true);
   const [nova, setNova] = useState(false);
-
   const [vinculoId, setVinculoId] = useState("");
   const [periodoInicio, setPeriodoInicio] = useState("");
   const [periodoFim, setPeriodoFim] = useState("");
@@ -119,146 +98,192 @@ export default function FeriasPage() {
   }
 
   return (
-    <div className="space-y-6 p-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">Férias</h1>
-          <p className="text-muted-foreground">Programação e cálculo de férias CLT</p>
-        </div>
-        <div className="flex gap-2">
-          <Button asChild variant="ghost">
-            <Link href="/dp">← Voltar</Link>
-          </Button>
-          {!nova && (
-            <Button onClick={() => setNova(true)}>
-              <Plus className="h-4 w-4 mr-1" /> Nova
-            </Button>
-          )}
+    <div className="min-h-screen bg-slate-50 -m-6">
+      {/* Header com gradiente — mesmo padrão de hoje */}
+      <div className="bg-gradient-to-r from-indigo-600 to-purple-600 px-6 py-6 rounded-b-3xl shadow-lg mb-5">
+        <div className="max-w-5xl mx-auto flex items-center justify-between">
+          <div>
+            <p className="text-indigo-200 text-sm font-medium">Departamento Pessoal</p>
+            <h1 className="text-white text-2xl font-bold mt-0.5">Férias</h1>
+            <p className="text-indigo-100 text-sm mt-1">Programação e cálculo de férias CLT</p>
+          </div>
+          <div className="flex gap-2">
+            <Link
+              href="/dp"
+              className="inline-flex items-center gap-1.5 px-4 py-2.5 bg-white/15 text-white rounded-xl text-sm font-semibold border border-white/20 hover:bg-white/25 transition"
+            >
+              <ArrowLeft className="h-4 w-4" /> Voltar
+            </Link>
+            <button
+              onClick={() => setNova(!nova)}
+              className="inline-flex items-center gap-1.5 px-4 py-2.5 bg-white text-indigo-700 rounded-xl text-sm font-semibold shadow-sm hover:bg-slate-50 transition"
+            >
+              <Plus className="h-4 w-4" /> Nova Férias
+            </button>
+          </div>
         </div>
       </div>
 
-      {nova && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Calcular férias</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label>Colaborador</Label>
-              <Select value={vinculoId} onValueChange={setVinculoId}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Selecione..." />
-                </SelectTrigger>
-                <SelectContent>
+      <div className="max-w-5xl mx-auto px-6 pb-8 space-y-5">
+        {nova && (
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5 space-y-4">
+            <h2 className="text-sm font-semibold text-slate-900">Calcular Nova Férias</h2>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="text-sm text-slate-500 block mb-1">Colaborador</label>
+                <select
+                  className="w-full border border-slate-200 rounded-xl p-2.5 text-sm bg-slate-50"
+                  value={vinculoId}
+                  onChange={(e) => setVinculoId(e.target.value)}
+                >
+                  <option value="">Selecione...</option>
                   {clts.map((c) => (
-                    <SelectItem key={c.id} value={String(c.id)}>
+                    <option key={c.id} value={c.id}>
                       {c.colaborador_nome}
-                    </SelectItem>
+                    </option>
                   ))}
-                </SelectContent>
-              </Select>
+                </select>
+              </div>
+              <div>
+                <label className="text-sm text-slate-500 block mb-1">Dias de gozo</label>
+                <input
+                  type="number"
+                  min={1}
+                  max={30}
+                  className="w-full border border-slate-200 rounded-xl p-2.5 text-sm bg-slate-50"
+                  value={diasGozo}
+                  onChange={(e) => setDiasGozo(e.target.value)}
+                />
+              </div>
             </div>
+
             <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>Período aquisitivo — início</Label>
-                <Input type="date" value={periodoInicio} onChange={(e) => setPeriodoInicio(e.target.value)} />
+              <div>
+                <label className="text-sm text-slate-500 block mb-1">Período aquisitivo — início</label>
+                <input
+                  type="date"
+                  className="w-full border border-slate-200 rounded-xl p-2.5 text-sm bg-slate-50"
+                  value={periodoInicio}
+                  onChange={(e) => setPeriodoInicio(e.target.value)}
+                />
               </div>
-              <div className="space-y-2">
-                <Label>Período aquisitivo — fim</Label>
-                <Input type="date" value={periodoFim} onChange={(e) => setPeriodoFim(e.target.value)} />
+              <div>
+                <label className="text-sm text-slate-500 block mb-1">Período aquisitivo — fim</label>
+                <input
+                  type="date"
+                  className="w-full border border-slate-200 rounded-xl p-2.5 text-sm bg-slate-50"
+                  value={periodoFim}
+                  onChange={(e) => setPeriodoFim(e.target.value)}
+                />
               </div>
             </div>
+
             <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>Início do gozo</Label>
-                <Input type="date" value={dataInicioGozo} onChange={(e) => setDataInicioGozo(e.target.value)} />
+              <div>
+                <label className="text-sm text-slate-500 block mb-1">Início do gozo</label>
+                <input
+                  type="date"
+                  className="w-full border border-slate-200 rounded-xl p-2.5 text-sm bg-slate-50"
+                  value={dataInicioGozo}
+                  onChange={(e) => setDataInicioGozo(e.target.value)}
+                />
               </div>
-              <div className="space-y-2">
-                <Label>Fim do gozo</Label>
-                <Input type="date" value={dataFimGozo} onChange={(e) => setDataFimGozo(e.target.value)} />
+              <div>
+                <label className="text-sm text-slate-500 block mb-1">Fim do gozo</label>
+                <input
+                  type="date"
+                  className="w-full border border-slate-200 rounded-xl p-2.5 text-sm bg-slate-50"
+                  value={dataFimGozo}
+                  onChange={(e) => setDataFimGozo(e.target.value)}
+                />
               </div>
             </div>
-            <div className="space-y-2">
-              <Label>Dias de gozo</Label>
-              <Input type="number" min="1" max="30" value={diasGozo} onChange={(e) => setDiasGozo(e.target.value)} />
-            </div>
-            <div className="flex items-center gap-2">
-              <input type="checkbox" id="abono" checked={abono} onChange={(e) => setAbono(e.target.checked)} />
-              <label htmlFor="abono" className="text-sm cursor-pointer">
-                Vender parte das férias (abono pecuniário, isento de INSS/IRRF)
-              </label>
-            </div>
+
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={abono} onChange={(e) => setAbono(e.target.checked)} className="w-4 h-4" />
+              Abono pecuniário (venda de férias)
+            </label>
             {abono && (
-              <div className="space-y-2">
-                <Label>Dias vendidos (até 10)</Label>
-                <Input type="number" min="0" max="10" value={diasAbono} onChange={(e) => setDiasAbono(e.target.value)} />
+              <div>
+                <label className="text-sm text-slate-500 block mb-1">Dias de abono</label>
+                <input
+                  type="number"
+                  min={0}
+                  max={10}
+                  className="w-full border border-slate-200 rounded-xl p-2.5 text-sm bg-slate-50"
+                  value={diasAbono}
+                  onChange={(e) => setDiasAbono(e.target.value)}
+                />
               </div>
             )}
-            {erro && <p className="text-sm text-red-600">{erro}</p>}
-            <div className="flex gap-2">
-              <Button onClick={salvar} disabled={salvando}>
-                {salvando ? "Calculando..." : "Calcular e salvar"}
-              </Button>
-              <Button variant="outline" onClick={() => setNova(false)}>
-                Cancelar
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      )}
 
-      <Card>
-        <CardContent className="p-0">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Colaborador</TableHead>
-                <TableHead>Gozo</TableHead>
-                <TableHead>Dias</TableHead>
-                <TableHead>Abono</TableHead>
-                <TableHead className="text-right">Bruto</TableHead>
-                <TableHead className="text-right">Líquido</TableHead>
-                <TableHead></TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {loading ? (
-                <TableRow>
-                  <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
-                    Carregando...
-                  </TableCell>
-                </TableRow>
-              ) : lista.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
-                    Nenhuma férias calculada ainda.
-                  </TableCell>
-                </TableRow>
-              ) : (
-                lista.map((f) => (
-                  <TableRow key={f.id}>
-                    <TableCell>{f.colaborador_nome}</TableCell>
-                    <TableCell>
-                      {new Date(f.data_inicio_gozo).toLocaleDateString("pt-BR")} - {new Date(f.data_fim_gozo).toLocaleDateString("pt-BR")}
-                    </TableCell>
-                    <TableCell>{f.dias_gozo}</TableCell>
-                    <TableCell>{f.abono_pecuniario ? <Badge variant="secondary">Sim</Badge> : "—"}</TableCell>
-                    <TableCell className="text-right">R$ {Number(f.total_bruto).toFixed(2)}</TableCell>
-                    <TableCell className="text-right font-medium">R$ {Number(f.total_liquido).toFixed(2)}</TableCell>
-                    <TableCell>
-                      <Button size="sm" variant="ghost" asChild>
-                        <a href={`/api/dp/pdf?tipo=ferias&id=${f.id}`} target="_blank" rel="noopener noreferrer">
-                          PDF
-                        </a>
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+            {erro && <p className="text-sm text-red-600">{erro}</p>}
+
+            <button
+              onClick={salvar}
+              disabled={salvando}
+              className="inline-flex items-center gap-2 px-4 py-2.5 bg-indigo-600 text-white rounded-xl text-sm font-semibold hover:bg-indigo-700 disabled:opacity-50"
+            >
+              {salvando ? "Calculando..." : "Calcular Férias"}
+            </button>
+          </div>
+        )}
+
+        {/* Lista de férias */}
+        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
+          <h2 className="text-sm font-semibold text-slate-900 mb-4 flex items-center gap-2">
+            <CalendarDays className="h-4 w-4 text-indigo-500" /> Férias Calculadas
+          </h2>
+          {loading ? (
+            <p className="text-sm text-slate-400 py-6 text-center">Carregando...</p>
+          ) : lista.length === 0 ? (
+            <p className="text-sm text-slate-400 py-6 text-center">Nenhuma férias calculada ainda.</p>
+          ) : (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-slate-400 border-b border-slate-100">
+                  <th className="pb-2">Colaborador</th>
+                  <th className="pb-2">Período de gozo</th>
+                  <th className="pb-2 text-center">Dias</th>
+                  <th className="pb-2 text-center">Abono</th>
+                  <th className="pb-2 text-right">Bruto</th>
+                  <th className="pb-2 text-right">Líquido</th>
+                  <th className="pb-2 text-center">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {lista.map((f) => (
+                  <tr key={f.id} className="border-b border-slate-50">
+                    <td className="py-2.5 font-medium text-slate-800">{f.colaborador_nome}</td>
+                    <td className="py-2.5 text-slate-600">
+                      {f.data_inicio_gozo} — {f.data_fim_gozo}
+                    </td>
+                    <td className="py-2.5 text-center">{f.dias_gozo}</td>
+                    <td className="py-2.5 text-center">
+                      {f.abono_pecuniario ? (
+                        <span className="text-[10px] px-2 py-0.5 rounded bg-violet-50 text-violet-700 font-medium">
+                          Sim
+                        </span>
+                      ) : (
+                        "—"
+                      )}
+                    </td>
+                    <td className="py-2.5 text-right text-emerald-600">R$ {Number(f.total_bruto).toFixed(2)}</td>
+                    <td className="py-2.5 text-right font-bold text-slate-900">
+                      R$ {Number(f.total_liquido).toFixed(2)}
+                    </td>
+                    <td className="py-2.5 text-center">
+                      <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 font-medium">
+                        {f.status}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
