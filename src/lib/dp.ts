@@ -10,6 +10,7 @@
 import { db } from "@/db";
 import { sql } from "drizzle-orm";
 import { criarLancamentoManual, listarContasBancarias } from "@/lib/financeiro";
+import { gerarLancamentoFolha } from "@/lib/integracaoContabilDP";
 
 // ============================================================
 // TIPOS
@@ -1033,7 +1034,25 @@ export async function processarFolhaCLT(
     avisoIntegracao = `Holerite processado, mas o lançamento financeiro automático falhou: ${e.message}`;
   }
 
-  return { ...holerite, lancamentoFinanceiro, avisoIntegracao };
+  // Integração com o Contábil: gera o lançamento de partida dobrada
+  // (débito despesa / crédito INSS+IRRF+FGTS+Salários a Pagar). Mesma
+  // proteção — se as contas contábeis não estiverem cadastradas pra
+  // essa empresa, o holerite continua valendo, só sem o lançamento.
+  let lancamentoContabil: Awaited<ReturnType<typeof gerarLancamentoFolha>> | null = null;
+  let avisoIntegracaoContabil: string | null = null;
+  try {
+    lancamentoContabil = await gerarLancamentoFolha(empresaId, dados.competencia, {
+      proventos: totalProventos,
+      inss: valorInss,
+      irrf: valorIrrf,
+      fgts: fgtsMes,
+      inssPatronal: null, // regime tributário da empresa não confirmado — não arrisca cobrar patronal indevido
+    });
+  } catch (e: any) {
+    avisoIntegracaoContabil = `Holerite processado, mas o lançamento contábil automático falhou: ${e.message}`;
+  }
+
+  return { ...holerite, lancamentoFinanceiro, avisoIntegracao, lancamentoContabil, avisoIntegracaoContabil };
 }
 
 export async function listarHolerites(empresaId: number, opts: { competencia?: string } = {}) {
