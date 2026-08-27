@@ -843,7 +843,8 @@ export async function processarFolhaCLT(
 ) {
   const vinculo = await db.execute(sql`
     SELECT cv.id, cv.colaborador_id, cv.tipo_vinculo, cv.salario_base, cv.valor_pensao_alimenticia,
-           cv.data_admissao, cv.num_filhos_salario_familia, cv.possui_periculosidade, c.nome_completo
+           cv.data_admissao, cv.num_filhos_salario_familia, cv.possui_periculosidade,
+           cv.valor_emprestimo_consignado, c.nome_completo
     FROM colaborador_vinculos cv
     JOIN colaboradores c ON c.id = cv.colaborador_id
     WHERE cv.colaborador_id = ${dados.colaboradorId} AND cv.empresa_id = ${empresaId}
@@ -965,6 +966,30 @@ export async function processarFolhaCLT(
       totalDescontos += valor;
     }
     itens.push({ codigo: rub.codigo, nome: rub.nome, tipo: rub.tipo, valor });
+  }
+
+  // Empréstimo consignado: limitado a 35% do líquido (Lei 10.820/2003,
+  // mantida na atualização de 2025/2026). Diferente da pensão, NÃO afeta
+  // a base de INSS/IRRF — é desconto puro do líquido, depois de tudo.
+  // Protege o colaborador automaticamente: se o valor pedido ultrapassar
+  // a margem, aplica só até o limite, não o valor cheio.
+  const valorConsignadoSolicitado = Number(v.valor_emprestimo_consignado ?? 0);
+  let valorConsignadoAplicado = 0;
+  let consignadoLimitado = false;
+  if (valorConsignadoSolicitado > 0) {
+    const liquidoAntesConsignado = Number((totalProventos - totalDescontos).toFixed(2));
+    const margemMaxima = Number((liquidoAntesConsignado * 0.35).toFixed(2));
+    valorConsignadoAplicado = Math.min(valorConsignadoSolicitado, margemMaxima);
+    consignadoLimitado = valorConsignadoAplicado < valorConsignadoSolicitado;
+    totalDescontos += valorConsignadoAplicado;
+    itens.push({
+      codigo: "CONSIGNADO",
+      nome: consignadoLimitado
+        ? `Empréstimo consignado (limitado a 35% da margem — solicitado R$ ${valorConsignadoSolicitado.toFixed(2)})`
+        : "Empréstimo consignado",
+      tipo: "DESCONTO",
+      valor: valorConsignadoAplicado,
+    });
   }
 
   totalProventos = Number(totalProventos.toFixed(2));
