@@ -61,6 +61,10 @@ export async function gerarLancamentoFolha(
   const inssPatronal = resumoFolha.inssPatronal ?? 0;
   const anoExercicio = Number(competencia.split("-")[0]);
   const numero = `DP-${competencia}-${Date.now().toString().slice(-6)}`;
+  // A coluna `competencia` na tabela `lancamentos` é do tipo DATE, não
+  // texto — precisa do dia também, não só "AAAA-MM" (foi exatamente o
+  // erro que travou o primeiro teste real hoje).
+  const competenciaData = `${competencia}-01`;
   // Líquido que ainda será pago ao colaborador — vira passivo "Salários
   // a Pagar", não desaparece do lançamento (bug do material original:
   // faltava essa conta, débito nunca fechava com crédito).
@@ -72,7 +76,7 @@ export async function gerarLancamentoFolha(
 
   const lancamento = await db.execute(sql`
     INSERT INTO lancamentos (empresa_id, competencia, numero, origem, historico, valor_total, data, exercicio, tipo_lanc)
-    VALUES (${empresaId}, ${competencia}, ${numero}, 'DP', ${"Provisão Folha " + competencia}, ${debitoTotal}, CURRENT_DATE, ${anoExercicio}, 'NORMAL')
+    VALUES (${empresaId}, ${competenciaData}, ${numero}, 'DP', ${"Provisão Folha " + competencia}, ${debitoTotal}, CURRENT_DATE, ${anoExercicio}, 'NORMAL')
     RETURNING id
   `);
   const idLanc = (lancamento.rows[0] as any).id;
