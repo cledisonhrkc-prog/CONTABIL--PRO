@@ -535,6 +535,27 @@ export async function atualizarPensaoAlimenticia(
  * admitido dentro do próprio mês da competência, retorna os dias restantes
  * a partir da data de admissão.
  */
+/**
+ * Auxílio-doença (Lei 8.213/91, Art. 60): a empresa é responsável por
+ * pagar só os primeiros 15 dias de qualquer afastamento por doença. A
+ * partir do 16º dia, o INSS assume — a empresa NÃO paga esses dias
+ * (não é desconto, simplesmente não fazem parte da folha).
+ */
+function calcularDiasPagosComAfastamento(diasTrabalhadosBase: number, diasAfastamento: number): {
+  diasPagos: number;
+  diasResponsabilidadeEmpresa: number;
+  diasResponsabilidadeInss: number;
+} {
+  if (diasAfastamento <= 0) {
+    return { diasPagos: diasTrabalhadosBase, diasResponsabilidadeEmpresa: 0, diasResponsabilidadeInss: 0 };
+  }
+  const diasResponsabilidadeEmpresa = Math.min(diasAfastamento, 15);
+  const diasResponsabilidadeInss = diasAfastamento - diasResponsabilidadeEmpresa;
+  const diasTrabalhadosNormal = diasTrabalhadosBase - diasAfastamento;
+  const diasPagos = diasTrabalhadosNormal + diasResponsabilidadeEmpresa;
+  return { diasPagos, diasResponsabilidadeEmpresa, diasResponsabilidadeInss };
+}
+
 function calcularDiasTrabalhados(dataAdmissao: string, competencia: string): number {
   const [anoComp, mesComp] = competencia.split("-").map(Number);
   const admissao = new Date(dataAdmissao + "T00:00:00");
@@ -839,6 +860,7 @@ export async function processarFolhaCLT(
     horaExtra50Horas?: number;
     horaExtra100Horas?: number;
     horasNoturnas?: number;
+    diasAfastamentoDoenca?: number;
   }
 ) {
   const vinculo = await db.execute(sql`
@@ -861,7 +883,18 @@ export async function processarFolhaCLT(
   // Rateio de mês parcial: se o colaborador foi admitido dentro do próprio
   // mês da competência, o salário (e tudo que é calculado a partir dele)
   // é proporcional aos dias trabalhados, não o valor cheio.
-  const diasTrabalhados = calcularDiasTrabalhados(v.data_admissao, dados.competencia);
+  const diasTrabalhadosBase = calcularDiasTrabalhados(v.data_admissao, dados.competencia);
+
+  // Afastamento por auxílio-doença reduz ainda mais os dias pagos pela
+  // empresa (só os primeiros 15 dias de cada afastamento são
+  // responsabilidade dela — o resto é o INSS quem paga, direto ao
+  // colaborador, fora da folha da empresa).
+  const diasAfastamento = dados.diasAfastamentoDoenca ?? 0;
+  const { diasPagos: diasTrabalhados, diasResponsabilidadeInss } = calcularDiasPagosComAfastamento(
+    diasTrabalhadosBase,
+    diasAfastamento
+  );
+
   const salarioBase =
     diasTrabalhados < 30
       ? Number(((salarioBaseIntegral * diasTrabalhados) / 30).toFixed(2))
@@ -938,7 +971,12 @@ export async function processarFolhaCLT(
   const itens: Array<{ codigo: string; nome: string; tipo: string; valor: number }> = [
     {
       codigo: "SALARIO",
-      nome: diasTrabalhados < 30 ? `Salário base (proporcional — ${diasTrabalhados}/30 dias)` : "Salário base",
+      nome:
+        diasAfastamento > 0
+          ? `Salário base (${diasTrabalhados}/30 dias — ${diasAfastamento} dias de afastamento, ${diasResponsabilidadeInss > 0 ? `${diasResponsabilidadeInss} sob responsabilidade do INSS` : "dentro dos 15 dias da empresa"})`
+          : diasTrabalhados < 30
+            ? `Salário base (proporcional — ${diasTrabalhados}/30 dias)`
+            : "Salário base",
       tipo: "PROVENTO",
       valor: salarioBase,
     },
