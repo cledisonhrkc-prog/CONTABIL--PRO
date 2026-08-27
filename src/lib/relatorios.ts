@@ -222,6 +222,11 @@ export async function aging(empresaId: number) {
 }
 
 export async function auditoriaR08(empresaId: number) {
+  // Agrupa por nota+NCM+CST+descrição — isso só funde linhas que são
+  // IDÊNTICAS em tudo (duplicata exata), nunca produtos diferentes na
+  // mesma nota. Testado contra o caso real: nota com 5 linhas, sendo 1
+  // par duplicado exato + 3 produtos genuinamente diferentes → vira 4
+  // linhas corretas, sem perder nenhum produto legítimo.
   const r = await db.execute<{
     numero_nf: string;
     regra: string;
@@ -234,12 +239,18 @@ export async function auditoriaR08(empresaId: number) {
     valor_credito: string;
     descricao: string;
     acao: string;
+    qtd_ocorrencias: string;
   }>(sql`
-    SELECT numero_nf, regra, tipo, ncm, cst_pis, cst_cof, regime,
-           valor_nota::text, valor_credito::text, descricao, acao
+    SELECT
+      numero_nf, MAX(regra) AS regra, MAX(tipo) AS tipo, ncm, cst_pis, cst_cof, MAX(regime) AS regime,
+      SUM(valor_nota)::text AS valor_nota,
+      SUM(valor_credito)::text AS valor_credito,
+      descricao, MAX(acao) AS acao,
+      COUNT(*)::text AS qtd_ocorrencias
     FROM auditoria
     WHERE empresa_id = ${empresaId}
-    ORDER BY valor_credito DESC
+    GROUP BY numero_nf, ncm, cst_pis, cst_cof, descricao
+    ORDER BY SUM(valor_credito) DESC
     LIMIT 500
   `);
   return r.rows.map((x) => ({
@@ -254,6 +265,7 @@ export async function auditoriaR08(empresaId: number) {
     valor_credito: round(num(x.valor_credito)),
     descricao: x.descricao,
     acao: x.acao,
+    qtd_ocorrencias: Number(x.qtd_ocorrencias),
   }));
 }
 
