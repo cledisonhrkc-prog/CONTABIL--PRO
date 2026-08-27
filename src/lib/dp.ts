@@ -1107,7 +1107,7 @@ export async function processarFolhaCLTLote(empresaId: number, competencia: stri
 // ============================================================
 // RESCISÃO CLT
 // ============================================================
-export type MotivoRescisao = "SEM_JUSTA_CAUSA" | "COM_JUSTA_CAUSA" | "PEDIDO_DEMISSAO";
+export type MotivoRescisao = "SEM_JUSTA_CAUSA" | "COM_JUSTA_CAUSA" | "PEDIDO_DEMISSAO" | "ACORDO";
 
 /**
  * Calcula e grava a rescisão de um vínculo CLT.
@@ -1166,18 +1166,26 @@ export async function calcularRescisao(
   const tercoFerias = Number((feriasProp / 3).toFixed(2));
   const decimoProp = Number(((salario / 12) * mesesPeriodoAtual).toFixed(2));
 
-  // Aviso prévio só é devido em dispensa sem justa causa (indenizado, 30 dias + 3/ano, máx 90)
+  // Aviso prévio: integral em SEM_JUSTA_CAUSA; pela METADE em ACORDO
+  // (Art. 484-A, CLT — Lei 13.467/2017); zero nos demais.
   let avisoPrevio = 0;
-  if (dados.motivo === "SEM_JUSTA_CAUSA") {
+  if (dados.motivo === "SEM_JUSTA_CAUSA" || dados.motivo === "ACORDO") {
     const diasAviso = Math.min(90, 30 + anosCompletos * 3);
     avisoPrevio = Number(((salario / 30) * diasAviso).toFixed(2));
+    if (dados.motivo === "ACORDO") {
+      avisoPrevio = Number((avisoPrevio / 2).toFixed(2));
+    }
   }
 
-  // Multa de 40% do FGTS só em dispensa sem justa causa
+  // Multa de FGTS: 40% em SEM_JUSTA_CAUSA; 20% em ACORDO (Art. 484-A);
+  // zero nos demais. Nota: em acordo, o colaborador só pode sacar até
+  // 80% do saldo de FGTS — isso é regra de saque, não de cálculo da
+  // rescisão em si, então não afeta o valor aqui.
   let multaFgts = 0;
-  if (dados.motivo === "SEM_JUSTA_CAUSA") {
+  if (dados.motivo === "SEM_JUSTA_CAUSA" || dados.motivo === "ACORDO") {
     const baseFgtsPeriodo = Number((salario * 0.08 * mesesPeriodoAtual).toFixed(2));
-    multaFgts = Number((baseFgtsPeriodo * 0.4).toFixed(2));
+    const percentualMulta = dados.motivo === "ACORDO" ? 0.2 : 0.4;
+    multaFgts = Number((baseFgtsPeriodo * percentualMulta).toFixed(2));
   }
 
   // INSS separado por verba (aviso prévio e multa FGTS = isentos)
