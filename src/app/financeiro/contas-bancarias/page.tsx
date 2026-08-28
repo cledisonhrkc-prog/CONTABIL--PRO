@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 interface ContaBancaria {
   id: number;
   nome: string;
-  banco?: string;
+  banco?: string | null;
   saldo_inicial?: string;
   ativa?: boolean;
 }

@@ -15,8 +15,8 @@ interface Transferencia {
   id: number;
   data: string;
   valor: string;
-  conta_origem_nome?: string;
-  conta_destino_nome?: string;
+  conta_origem_nome?: string | null;
+  conta_destino_nome?: string | null;
 }
 
 export default function TransferenciasPage() {

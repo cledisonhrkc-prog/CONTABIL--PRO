@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 interface Categoria {
   id: number;
   nome: string;
-  tipo: "ENTRADA" | "SAIDA";
+  tipo: "ENTRADA" | "SAIDA" | null;
 }
 
 export default function CategoriasPage() {
@@ -153,7 +153,7 @@ export default function CategoriasPage() {
                           c.tipo === "ENTRADA" ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"
                         }`}
                       >
-                        {c.tipo}
+                        {c.tipo || "—"}
                       </span>
                     </td>
                   </tr>
