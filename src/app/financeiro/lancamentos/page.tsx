@@ -1,155 +1,239 @@
-import { db } from "@/db";
-import { lancamentosFinanceiros, contasBancarias, categoriasFinanceiras } from "@/db/schema-financeiro";
-import { eq, and, desc } from "drizzle-orm";
-import { formatCurrency, formatDate, statusLabel, statusColor } from "@/lib/format";
-import Link from "next/link";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { Card, CardContent } from "@/components/ui/card";
-import { Plus } from "lucide-react";
-import { getAuthContext } from "@/lib/auth-financeiro";
+"use client";
 
-// Página mostra dado por empresa/sessão logada — nunca pode ser estática
+import { useEffect, useState } from "react";
+import Link from "next/link";
+import { ArrowLeft, Plus, FileText } from "lucide-react";
+
 export const dynamic = "force-dynamic";
 
-export default async function LancamentosPage() {
-  const { empresaId } = await getAuthContext();
+interface ContaBancaria {
+  id: number;
+  nome: string;
+}
 
-  const lancamentos = await db
-    .select({
-      id: lancamentosFinanceiros.id,
-      tipo: lancamentosFinanceiros.tipo,
-      data: lancamentosFinanceiros.data,
-      valor: lancamentosFinanceiros.valor,
-      descricao: lancamentosFinanceiros.descricao,
-      participante: lancamentosFinanceiros.participante,
-      status: lancamentosFinanceiros.status,
-      origem: lancamentosFinanceiros.origem,
-      formaPagamento: lancamentosFinanceiros.formaPagamento,
-      contaNome: contasBancarias.nome,
-      categoriaNome: categoriasFinanceiras.nome,
-    })
-    .from(lancamentosFinanceiros)
-    .leftJoin(
-      contasBancarias,
-      eq(lancamentosFinanceiros.contaBancariaId, contasBancarias.id)
-    )
-    .leftJoin(
-      categoriasFinanceiras,
-      eq(lancamentosFinanceiros.categoriaId, categoriasFinanceiras.id)
-    )
-    .where(eq(lancamentosFinanceiros.empresaId, empresaId))
-    .orderBy(desc(lancamentosFinanceiros.data), desc(lancamentosFinanceiros.id))
-    .limit(200);
+interface Lancamento {
+  id: number;
+  tipo: "ENTRADA" | "SAIDA";
+  data: string;
+  valor: string;
+  descricao: string;
+  participante?: string;
+}
+
+export default function LancamentosPage() {
+  const [contas, setContas] = useState<ContaBancaria[]>([]);
+  const [lista, setLista] = useState<Lancamento[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [novo, setNovo] = useState(false);
+  const [tipo, setTipo] = useState<"ENTRADA" | "SAIDA">("SAIDA");
+  const [data, setData] = useState("");
+  const [valor, setValor] = useState("");
+  const [descricao, setDescricao] = useState("");
+  const [contaBancariaId, setContaBancariaId] = useState("");
+  const [participante, setParticipante] = useState("");
+  const [salvando, setSalvando] = useState(false);
+  const [erro, setErro] = useState("");
+
+  async function load() {
+    setLoading(true);
+    try {
+      const res = await fetch("/api/financeiro/lancamentos");
+      const dataRes = await res.json();
+      setLista(Array.isArray(dataRes) ? dataRes : dataRes?.value || []);
+    } catch {
+      // silencioso
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    fetch("/api/financeiro/contas-bancarias")
+      .then((r) => r.json())
+      .then((d) => setContas(Array.isArray(d) ? d : d?.value || []))
+      .catch(() => {});
+    load();
+  }, []);
+
+  async function salvar() {
+    if (!data || !valor || !descricao || !contaBancariaId) {
+      setErro("Preencha data, valor, descrição e conta bancária.");
+      return;
+    }
+    setSalvando(true);
+    setErro("");
+    try {
+      const res = await fetch("/api/financeiro/lancamentos", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          tipo,
+          data,
+          valor: Number(valor),
+          descricao,
+          contaBancariaId: Number(contaBancariaId),
+          participante: participante || undefined,
+        }),
+      });
+      const resData = await res.json();
+      if (!res.ok) throw new Error(resData?.error || "Erro ao lançar.");
+      setNovo(false);
+      setData("");
+      setValor("");
+      setDescricao("");
+      setParticipante("");
+      await load();
+    } catch (e: any) {
+      setErro(e.message || "Erro ao lançar.");
+    } finally {
+      setSalvando(false);
+    }
+  }
 
   return (
-    <div className="space-y-6 p-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">Lançamentos Financeiros</h1>
-          <p className="text-muted-foreground">
-            Movimentações manuais, baixas e transferências
-          </p>
-        </div>
-        <div className="flex gap-2">
-          <Button asChild>
-            <Link href="/financeiro/lancamentos/novo">
-              <Plus className="mr-2 h-4 w-4" />
-              Novo Lançamento
+    <div className="min-h-screen bg-slate-50 -m-6">
+      <div className="bg-gradient-to-r from-indigo-600 to-purple-600 px-6 py-6 rounded-b-3xl shadow-lg mb-5">
+        <div className="max-w-5xl mx-auto flex items-center justify-between">
+          <div>
+            <p className="text-indigo-200 text-sm font-medium">Financeiro</p>
+            <h1 className="text-white text-2xl font-bold mt-0.5">Lançamentos</h1>
+            <p className="text-indigo-100 text-sm mt-1">Entradas e saídas manuais</p>
+          </div>
+          <div className="flex gap-2">
+            <Link
+              href="/financeiro"
+              className="inline-flex items-center gap-1.5 px-4 py-2.5 bg-white/15 text-white rounded-xl text-sm font-semibold border border-white/20 hover:bg-white/25 transition"
+            >
+              <ArrowLeft className="h-4 w-4" /> Voltar
             </Link>
-          </Button>
-          <Button asChild variant="outline">
-            <Link href="/financeiro/transferencias">Transferência</Link>
-          </Button>
-          <Button asChild variant="outline">
-            <Link href="/financeiro">Voltar</Link>
-          </Button>
+            <button
+              onClick={() => setNovo(!novo)}
+              className="inline-flex items-center gap-1.5 px-4 py-2.5 bg-white text-indigo-700 rounded-xl text-sm font-semibold shadow-sm hover:bg-slate-50 transition"
+            >
+              <Plus className="h-4 w-4" /> Novo Lançamento
+            </button>
+          </div>
         </div>
       </div>
 
-      <Card>
-        <CardContent className="p-0">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Data</TableHead>
-                <TableHead>Tipo</TableHead>
-                <TableHead>Descrição</TableHead>
-                <TableHead>Conta</TableHead>
-                <TableHead>Categoria</TableHead>
-                <TableHead className="text-right">Valor</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Origem</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {lancamentos.length === 0 && (
-                <TableRow>
-                  <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
-                    Nenhum lançamento encontrado
-                  </TableCell>
-                </TableRow>
-              )}
-              {lancamentos.map((l) => (
-                <TableRow key={l.id}>
-                  <TableCell>{formatDate(l.data)}</TableCell>
-                  <TableCell>
-                    <Badge
-                      variant="secondary"
-                      className={
-                        l.tipo === "ENTRADA"
-                          ? "bg-green-100 text-green-800"
-                          : l.tipo === "SAIDA"
-                          ? "bg-red-100 text-red-800"
-                          : "bg-blue-100 text-blue-800"
-                      }
+      <div className="max-w-5xl mx-auto px-6 pb-8 space-y-5">
+        {novo && (
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5 space-y-4">
+            <h2 className="text-sm font-semibold text-slate-900">Novo Lançamento</h2>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="text-sm text-slate-500 block mb-1">Tipo</label>
+                <select
+                  className="w-full border border-slate-200 rounded-xl p-2.5 text-sm bg-slate-50"
+                  value={tipo}
+                  onChange={(e) => setTipo(e.target.value as "ENTRADA" | "SAIDA")}
+                >
+                  <option value="SAIDA">Saída</option>
+                  <option value="ENTRADA">Entrada</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-sm text-slate-500 block mb-1">Conta bancária</label>
+                <select
+                  className="w-full border border-slate-200 rounded-xl p-2.5 text-sm bg-slate-50"
+                  value={contaBancariaId}
+                  onChange={(e) => setContaBancariaId(e.target.value)}
+                >
+                  <option value="">Selecione...</option>
+                  {contas.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.nome}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="text-sm text-slate-500 block mb-1">Data</label>
+                <input
+                  type="date"
+                  className="w-full border border-slate-200 rounded-xl p-2.5 text-sm bg-slate-50"
+                  value={data}
+                  onChange={(e) => setData(e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="text-sm text-slate-500 block mb-1">Valor (R$)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  className="w-full border border-slate-200 rounded-xl p-2.5 text-sm bg-slate-50"
+                  value={valor}
+                  onChange={(e) => setValor(e.target.value)}
+                />
+              </div>
+            </div>
+            <div>
+              <label className="text-sm text-slate-500 block mb-1">Descrição</label>
+              <input
+                type="text"
+                className="w-full border border-slate-200 rounded-xl p-2.5 text-sm bg-slate-50"
+                value={descricao}
+                onChange={(e) => setDescricao(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="text-sm text-slate-500 block mb-1">Participante (opcional)</label>
+              <input
+                type="text"
+                className="w-full border border-slate-200 rounded-xl p-2.5 text-sm bg-slate-50"
+                value={participante}
+                onChange={(e) => setParticipante(e.target.value)}
+              />
+            </div>
+            {erro && <p className="text-sm text-red-600">{erro}</p>}
+            <button
+              onClick={salvar}
+              disabled={salvando}
+              className="inline-flex items-center gap-2 px-4 py-2.5 bg-indigo-600 text-white rounded-xl text-sm font-semibold hover:bg-indigo-700 disabled:opacity-50"
+            >
+              {salvando ? "Salvando..." : "Lançar"}
+            </button>
+          </div>
+        )}
+
+        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
+          <h2 className="text-sm font-semibold text-slate-900 mb-4 flex items-center gap-2">
+            <FileText className="h-4 w-4 text-indigo-500" /> Lançamentos
+          </h2>
+          {loading ? (
+            <p className="text-sm text-slate-400 py-6 text-center">Carregando...</p>
+          ) : lista.length === 0 ? (
+            <p className="text-sm text-slate-400 py-6 text-center">Nenhum lançamento cadastrado.</p>
+          ) : (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-slate-400 border-b border-slate-100">
+                  <th className="pb-2">Data</th>
+                  <th className="pb-2">Descrição</th>
+                  <th className="pb-2 text-right">Valor</th>
+                </tr>
+              </thead>
+              <tbody>
+                {lista.map((l) => (
+                  <tr key={l.id} className="border-b border-slate-50">
+                    <td className="py-2.5 text-slate-600">{l.data}</td>
+                    <td className="py-2.5 font-medium text-slate-800">{l.descricao}</td>
+                    <td
+                      className={`py-2.5 text-right font-bold ${
+                        l.tipo === "ENTRADA" ? "text-emerald-600" : "text-red-600"
+                      }`}
                     >
-                      {l.tipo}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="max-w-[250px]">
-                    <div className="truncate font-medium">{l.descricao}</div>
-                    {l.participante && (
-                      <div className="text-xs text-muted-foreground truncate">
-                        {l.participante}
-                      </div>
-                    )}
-                  </TableCell>
-                  <TableCell>{l.contaNome || "-"}</TableCell>
-                  <TableCell>{l.categoriaNome || "-"}</TableCell>
-                  <TableCell
-                    className={`text-right font-semibold ${
-                      l.tipo === "ENTRADA"
-                        ? "text-green-600"
-                        : l.tipo === "SAIDA"
-                        ? "text-red-600"
-                        : ""
-                    }`}
-                  >
-                    {formatCurrency(l.valor)}
-                  </TableCell>
-                  <TableCell>
-                    <Badge className={statusColor(l.status || "CONFIRMADO")} variant="secondary">
-                      {statusLabel(l.status || "CONFIRMADO")}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="text-xs text-muted-foreground">
-                    {l.origem}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+                      {l.tipo === "ENTRADA" ? "+" : "-"}R$ {Number(l.valor).toFixed(2)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
