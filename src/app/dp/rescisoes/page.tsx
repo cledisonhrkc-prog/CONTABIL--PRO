@@ -2,134 +2,220 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+import { ArrowLeft, Plus, LogOut, Download } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
+type VinculoCLT = { id: number; colaborador_nome: string };
 type Rescisao = {
   id: number;
   colaborador_nome: string;
-  data_demissao: string;
   motivo: string;
-  total_proventos: string;
-  total_descontos: string;
+  data_rescisao: string;
   total_liquido: string;
   status: string;
 };
 
-const MOTIVO_LABEL: Record<string, string> = {
-  SEM_JUSTA_CAUSA: "Sem justa causa",
-  COM_JUSTA_CAUSA: "Com justa causa",
-  PEDIDO_DEMISSAO: "Pedido de demissão",
-};
+const MOTIVOS = [
+  { value: "SEM_JUSTA_CAUSA", label: "Sem Justa Causa" },
+  { value: "COM_JUSTA_CAUSA", label: "Com Justa Causa" },
+  { value: "PEDIDO_DEMISSAO", label: "Pedido de Demissão" },
+  { value: "ACORDO", label: "Acordo Mútuo (Art. 484-A)" },
+];
 
 export default function RescisoesPage() {
-  const [rescisoes, setRescisoes] = useState<Rescisao[]>([]);
+  const [clts, setClts] = useState<VinculoCLT[]>([]);
+  const [lista, setLista] = useState<Rescisao[]>([]);
   const [loading, setLoading] = useState(true);
-  const [erro, setErro] = useState<string | null>(null);
+  const [nova, setNova] = useState(false);
+  const [vinculoId, setVinculoId] = useState("");
+  const [motivo, setMotivo] = useState("SEM_JUSTA_CAUSA");
+  const [dataRescisao, setDataRescisao] = useState("");
+  const [salvando, setSalvando] = useState(false);
+  const [erro, setErro] = useState("");
+
+  async function load() {
+    setLoading(true);
+    try {
+      const res = await fetch("/api/dp/rescisao");
+      const data = await res.json();
+      setLista(Array.isArray(data) ? data : []);
+    } catch {
+      // silencioso
+    } finally {
+      setLoading(false);
+    }
+  }
 
   useEffect(() => {
-    async function load() {
-      setLoading(true);
-      setErro(null);
-      try {
-        const res = await fetch("/api/dp/rescisao");
-        const data = await res.json();
-        if (!res.ok) throw new Error(data?.error || `Erro ao carregar (${res.status})`);
-        setRescisoes(Array.isArray(data) ? data : []);
-      } catch (e: any) {
-        setErro(e.message || "Erro ao carregar rescisões.");
-      } finally {
-        setLoading(false);
-      }
-    }
+    fetch("/api/dp/vinculos?tipoVinculo=CLT")
+      .then((r) => r.json())
+      .then((data) => setClts(Array.isArray(data) ? data : []))
+      .catch(() => {});
     load();
   }, []);
 
+  async function salvar() {
+    if (!vinculoId || !dataRescisao) {
+      setErro("Selecione o colaborador e a data.");
+      return;
+    }
+    setSalvando(true);
+    setErro("");
+    try {
+      const res = await fetch("/api/dp/rescisao", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ vinculoId: Number(vinculoId), motivo, dataRescisao }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Erro ao calcular rescisão");
+      setNova(false);
+      setVinculoId("");
+      setDataRescisao("");
+      setMotivo("SEM_JUSTA_CAUSA");
+      await load();
+    } catch (e: any) {
+      setErro(e.message || "Erro ao calcular rescisão.");
+    } finally {
+      setSalvando(false);
+    }
+  }
+
   return (
-    <div className="space-y-6 p-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">Rescisões</h1>
-          <p className="text-muted-foreground">
-            INSS/IRRF calculados separadamente por verba (saldo, férias, 13º) — aviso prévio isento
-          </p>
+    <div className="min-h-screen bg-slate-50 -m-6">
+      <div className="bg-gradient-to-r from-indigo-600 to-purple-600 px-6 py-6 rounded-b-3xl shadow-lg mb-5">
+        <div className="max-w-5xl mx-auto flex items-center justify-between">
+          <div>
+            <p className="text-indigo-200 text-sm font-medium">Departamento Pessoal</p>
+            <h1 className="text-white text-2xl font-bold mt-0.5">Rescisões</h1>
+            <p className="text-indigo-100 text-sm mt-1">Cálculo de rescisão contratual</p>
+          </div>
+          <div className="flex gap-2">
+            <Link
+              href="/dp"
+              className="inline-flex items-center gap-1.5 px-4 py-2.5 bg-white/15 text-white rounded-xl text-sm font-semibold border border-white/20 hover:bg-white/25 transition"
+            >
+              <ArrowLeft className="h-4 w-4" /> Voltar
+            </Link>
+            <button
+              onClick={() => setNova(!nova)}
+              className="inline-flex items-center gap-1.5 px-4 py-2.5 bg-white text-indigo-700 rounded-xl text-sm font-semibold shadow-sm hover:bg-slate-50 transition"
+            >
+              <Plus className="h-4 w-4" /> Nova Rescisão
+            </button>
+          </div>
         </div>
-        <Button asChild variant="ghost">
-          <Link href="/dp">← Voltar</Link>
-        </Button>
       </div>
 
-      <Card>
-        <CardContent className="p-0">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Colaborador</TableHead>
-                <TableHead>Demissão</TableHead>
-                <TableHead>Motivo</TableHead>
-                <TableHead className="text-right">Proventos</TableHead>
-                <TableHead className="text-right">Descontos</TableHead>
-                <TableHead className="text-right">Líquido</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead></TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {erro ? (
-                <TableRow>
-                  <TableCell colSpan={8} className="text-center py-10 text-amber-700 bg-amber-50">
-                    {erro}
-                  </TableCell>
-                </TableRow>
-              ) : loading ? (
-                <TableRow>
-                  <TableCell colSpan={8} className="text-center py-10 text-muted-foreground">
-                    Carregando...
-                  </TableCell>
-                </TableRow>
-              ) : rescisoes.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={8} className="text-center py-10 text-muted-foreground">
-                    Nenhuma rescisão calculada ainda.
-                  </TableCell>
-                </TableRow>
-              ) : (
-                rescisoes.map((r) => (
-                  <TableRow key={r.id}>
-                    <TableCell>{r.colaborador_nome}</TableCell>
-                    <TableCell>{new Date(r.data_demissao).toLocaleDateString("pt-BR")}</TableCell>
-                    <TableCell>{MOTIVO_LABEL[r.motivo] || r.motivo}</TableCell>
-                    <TableCell className="text-right">R$ {Number(r.total_proventos).toFixed(2)}</TableCell>
-                    <TableCell className="text-right">R$ {Number(r.total_descontos).toFixed(2)}</TableCell>
-                    <TableCell className="text-right font-medium">R$ {Number(r.total_liquido).toFixed(2)}</TableCell>
-                    <TableCell>
-                      <Badge>{r.status}</Badge>
-                    </TableCell>
-                    <TableCell>
-                      <Button size="sm" variant="ghost" asChild>
-                        <a href={`/api/dp/pdf?tipo=rescisao&id=${r.id}`} target="_blank" rel="noopener noreferrer">
-                          PDF
-                        </a>
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+      <div className="max-w-5xl mx-auto px-6 pb-8 space-y-5">
+        {nova && (
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5 space-y-4">
+            <h2 className="text-sm font-semibold text-slate-900">Calcular Rescisão</h2>
+            <div className="grid grid-cols-3 gap-4">
+              <div>
+                <label className="text-sm text-slate-500 block mb-1">Colaborador</label>
+                <select
+                  className="w-full border border-slate-200 rounded-xl p-2.5 text-sm bg-slate-50"
+                  value={vinculoId}
+                  onChange={(e) => setVinculoId(e.target.value)}
+                >
+                  <option value="">Selecione...</option>
+                  {clts.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.colaborador_nome}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-sm text-slate-500 block mb-1">Motivo</label>
+                <select
+                  className="w-full border border-slate-200 rounded-xl p-2.5 text-sm bg-slate-50"
+                  value={motivo}
+                  onChange={(e) => setMotivo(e.target.value)}
+                >
+                  {MOTIVOS.map((m) => (
+                    <option key={m.value} value={m.value}>
+                      {m.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-sm text-slate-500 block mb-1">Data da rescisão</label>
+                <input
+                  type="date"
+                  className="w-full border border-slate-200 rounded-xl p-2.5 text-sm bg-slate-50"
+                  value={dataRescisao}
+                  onChange={(e) => setDataRescisao(e.target.value)}
+                />
+              </div>
+            </div>
+            {erro && <p className="text-sm text-red-600">{erro}</p>}
+            <button
+              onClick={salvar}
+              disabled={salvando}
+              className="inline-flex items-center gap-2 px-4 py-2.5 bg-indigo-600 text-white rounded-xl text-sm font-semibold hover:bg-indigo-700 disabled:opacity-50"
+            >
+              {salvando ? "Calculando..." : "Calcular Rescisão"}
+            </button>
+          </div>
+        )}
+
+        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
+          <h2 className="text-sm font-semibold text-slate-900 mb-4 flex items-center gap-2">
+            <LogOut className="h-4 w-4 text-indigo-500" /> Rescisões Calculadas
+          </h2>
+          {loading ? (
+            <p className="text-sm text-slate-400 py-6 text-center">Carregando...</p>
+          ) : lista.length === 0 ? (
+            <p className="text-sm text-slate-400 py-6 text-center">Nenhuma rescisão calculada ainda.</p>
+          ) : (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-slate-400 border-b border-slate-100">
+                  <th className="pb-2">Colaborador</th>
+                  <th className="pb-2">Motivo</th>
+                  <th className="pb-2">Data</th>
+                  <th className="pb-2 text-right">Líquido</th>
+                  <th className="pb-2 text-center">Status</th>
+                  <th className="pb-2 text-center">PDF</th>
+                </tr>
+              </thead>
+              <tbody>
+                {lista.map((r) => (
+                  <tr key={r.id} className="border-b border-slate-50">
+                    <td className="py-2.5 font-medium text-slate-800">{r.colaborador_nome}</td>
+                    <td className="py-2.5 text-slate-600">
+                      {MOTIVOS.find((m) => m.value === r.motivo)?.label || r.motivo}
+                    </td>
+                    <td className="py-2.5 text-slate-600">{r.data_rescisao}</td>
+                    <td className="py-2.5 text-right font-bold text-slate-900">
+                      R$ {Number(r.total_liquido).toFixed(2)}
+                    </td>
+                    <td className="py-2.5 text-center">
+                      <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 font-medium">
+                        {r.status}
+                      </span>
+                    </td>
+                    <td className="py-2.5 text-center">
+                      <a
+                        href={`/api/dp/pdf?tipo=rescisao&id=${r.id}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1 text-indigo-600 hover:underline text-xs"
+                      >
+                        <Download className="h-3.5 w-3.5" /> PDF
+                      </a>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
